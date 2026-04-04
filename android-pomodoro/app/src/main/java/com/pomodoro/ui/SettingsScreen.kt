@@ -15,15 +15,17 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.Button
 import androidx.compose.material.ButtonDefaults
 import androidx.compose.material.Card
 import androidx.compose.material.CircularProgressIndicator
 import androidx.compose.material.Icon
+import androidx.compose.material.IconButton
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.OutlinedButton
 import androidx.compose.material.OutlinedTextField
@@ -33,6 +35,8 @@ import androidx.compose.material.Text
 import androidx.compose.material.TextButton
 import androidx.compose.material.TextFieldDefaults
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.CloudDownload
@@ -50,6 +54,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -65,6 +71,7 @@ object SettingsPrefs {
     private const val KEY_FOCUS = "focus_minutes"
     private const val KEY_REVIEW = "review_minutes"
     private const val KEY_BREAK = "break_minutes"
+    private const val KEY_FOCUS_CHECKLIST = "focus_checklist"
 
     fun loadPrefs(ctx: Context): Triple<Int, Int, Int> {
         val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -81,6 +88,20 @@ object SettingsPrefs {
             .putInt(KEY_FOCUS, focus)
             .putInt(KEY_REVIEW, review)
             .putInt(KEY_BREAK, brk)
+            .apply()
+    }
+
+    fun loadFocusChecklist(ctx: Context): List<String> {
+        val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val raw = prefs.getString(KEY_FOCUS_CHECKLIST, "") ?: ""
+        if (raw.isBlank()) return emptyList()
+        return raw.split("\n").filter { it.isNotBlank() }
+    }
+
+    fun saveFocusChecklist(ctx: Context, items: List<String>) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_FOCUS_CHECKLIST, items.joinToString("\n"))
             .apply()
     }
 }
@@ -196,12 +217,154 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
+        // Focus Checklist Section
+        SectionHeader(title = "FOCUS CHECKLIST")
+
+        FocusChecklistSection(ctx = ctx)
+
+        Spacer(modifier = Modifier.height(24.dp))
+
         // Backup Section
         SectionHeader(title = "BACKUP & RESTORE")
 
         BackupSection(ctx = ctx, viewModel = viewModel)
 
         Spacer(modifier = Modifier.height(80.dp))
+    }
+}
+
+@Composable
+private fun FocusChecklistSection(ctx: Context) {
+    var items by remember { mutableStateOf(SettingsPrefs.loadFocusChecklist(ctx)) }
+    var newItemText by remember { mutableStateOf("") }
+
+    fun save(updated: List<String>) {
+        items = updated
+        SettingsPrefs.saveFocusChecklist(ctx, updated)
+    }
+
+    Card(
+        backgroundColor = MaterialTheme.colors.surface,
+        shape = RoundedCornerShape(16.dp),
+        elevation = 1.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "Pre-focus checklist",
+                style = MaterialTheme.typography.subtitle1,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colors.onSurface
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text(
+                text = "Items must be checked before the focus timer runs",
+                style = MaterialTheme.typography.caption,
+                color = MaterialTheme.colors.onSurface.copy(alpha = 0.5f)
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            items.forEachIndexed { index, item ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "\u2022",
+                        color = MaterialTheme.colors.primary,
+                        fontSize = 16.sp,
+                        modifier = Modifier.padding(start = 4.dp, end = 10.dp)
+                    )
+                    Text(
+                        text = item,
+                        style = MaterialTheme.typography.body2,
+                        color = MaterialTheme.colors.onSurface,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(
+                        onClick = { save(items.toMutableList().also { it.removeAt(index) }) },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Remove",
+                            tint = MaterialTheme.colors.onSurface.copy(alpha = 0.35f),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = newItemText,
+                    onValueChange = { newItemText = it },
+                    placeholder = {
+                        Text(
+                            "Add checklist item...",
+                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.4f),
+                            style = MaterialTheme.typography.body2
+                        )
+                    },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = TextFieldDefaults.outlinedTextFieldColors(
+                        focusedBorderColor = MaterialTheme.colors.primary,
+                        unfocusedBorderColor = MaterialTheme.colors.onSurface.copy(alpha = 0.15f),
+                        textColor = MaterialTheme.colors.onSurface,
+                        cursorColor = MaterialTheme.colors.primary
+                    ),
+                    textStyle = MaterialTheme.typography.body2,
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Sentences,
+                        imeAction = ImeAction.Done
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onDone = {
+                            if (newItemText.isNotBlank()) {
+                                save(items + newItemText.trim())
+                                newItemText = ""
+                            }
+                        }
+                    ),
+                    modifier = Modifier.weight(1f)
+                )
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                IconButton(
+                    onClick = {
+                        if (newItemText.isNotBlank()) {
+                            save(items + newItemText.trim())
+                            newItemText = ""
+                        }
+                    },
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colors.primary)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Add item",
+                        tint = MaterialTheme.colors.onPrimary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+        }
     }
 }
 

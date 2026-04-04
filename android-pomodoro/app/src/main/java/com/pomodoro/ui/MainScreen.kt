@@ -81,6 +81,13 @@ fun MainScreen(viewModel: TimerViewModel = viewModel()) {
 
     val state = uiState ?: return
 
+    // Load checklist when entering focus mode
+    LaunchedEffect(state.mode) {
+        if (state.mode == TimerMode.FOCUS && !state.isRunning && state.focusChecklist.isEmpty()) {
+            viewModel.loadFocusChecklist(ctx)
+        }
+    }
+
     // Show toast on generate error
     LaunchedEffect(state.generateError) {
         state.generateError?.let {
@@ -162,6 +169,28 @@ fun MainScreen(viewModel: TimerViewModel = viewModel()) {
 
         Spacer(modifier = Modifier.height(20.dp))
 
+        // Focus checklist — must complete before timer runs
+        AnimatedVisibility(
+            visible = state.mode == TimerMode.FOCUS && state.focusChecklist.isNotEmpty() && !state.checklistCompleted,
+            enter = expandVertically(),
+            exit = shrinkVertically()
+        ) {
+            FocusChecklistCard(
+                checklist = state.focusChecklist,
+                accentColor = accentColor,
+                onToggle = { viewModel.toggleChecklistItem(it) }
+            )
+        }
+
+        // Auto-start timer when checklist completed
+        LaunchedEffect(state.checklistCompleted, state.mode) {
+            if (state.mode == TimerMode.FOCUS && state.checklistCompleted
+                && !state.isRunning && state.focusChecklist.isNotEmpty()
+                && state.focusChecklist.all { it.isChecked }) {
+                viewModel.toggleRunning()
+            }
+        }
+
         // Task name & subtasks — visible only in FOCUS mode
         AnimatedVisibility(
             visible = state.mode == TimerMode.FOCUS,
@@ -206,12 +235,14 @@ fun MainScreen(viewModel: TimerViewModel = viewModel()) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
             ) {
+                val canPlay = state.mode != TimerMode.FOCUS || state.checklistCompleted
+
                 IconButton(
-                    onClick = { viewModel.toggleRunning() },
+                    onClick = { if (canPlay) viewModel.toggleRunning() },
                     modifier = Modifier
                         .size(72.dp)
                         .clip(CircleShape)
-                        .background(accentColor)
+                        .background(if (canPlay) accentColor else accentColor.copy(alpha = 0.3f))
                 ) {
                     Icon(
                         imageVector = if (state.isRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
@@ -651,6 +682,63 @@ private fun ReviewQuestionCard(
                         contentDescription = "Add",
                         tint = accentColor,
                         modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FocusChecklistCard(
+    checklist: List<FocusCheckItem>,
+    accentColor: Color,
+    onToggle: (Int) -> Unit
+) {
+    Card(
+        backgroundColor = MaterialTheme.colors.surface,
+        shape = RoundedCornerShape(16.dp),
+        elevation = 1.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 16.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "Before you start",
+                style = MaterialTheme.typography.subtitle2,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colors.onSurface
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            checklist.forEachIndexed { index, item ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onToggle(index) }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Checkbox(
+                        checked = item.isChecked,
+                        onCheckedChange = { onToggle(index) },
+                        colors = CheckboxDefaults.colors(
+                            checkedColor = accentColor,
+                            uncheckedColor = MaterialTheme.colors.onSurface.copy(alpha = 0.3f),
+                            checkmarkColor = Color.White
+                        )
+                    )
+                    Text(
+                        text = item.text,
+                        style = MaterialTheme.typography.body2,
+                        color = if (item.isChecked)
+                            MaterialTheme.colors.onSurface.copy(alpha = 0.4f)
+                        else
+                            MaterialTheme.colors.onSurface,
+                        textDecoration = if (item.isChecked) TextDecoration.LineThrough else TextDecoration.None
                     )
                 }
             }

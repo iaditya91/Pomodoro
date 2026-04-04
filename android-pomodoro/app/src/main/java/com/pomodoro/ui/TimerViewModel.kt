@@ -47,6 +47,11 @@ data class TodoTask(
     val text: String = ""
 )
 
+data class FocusCheckItem(
+    val text: String,
+    val isChecked: Boolean = false
+)
+
 data class TimerUiState(
     val mode: TimerMode = TimerMode.FOCUS,
     val remainingMillis: Long = 0L,
@@ -55,7 +60,9 @@ data class TimerUiState(
     val subtasks: List<Subtask> = emptyList(),
     val reviewAnswers: ReviewAnswers = ReviewAnswers(),
     val isGenerating: Boolean = false,
-    val generateError: String? = null
+    val generateError: String? = null,
+    val focusChecklist: List<FocusCheckItem> = emptyList(),
+    val checklistCompleted: Boolean = true
 )
 
 class TimerViewModel(application: Application) : AndroidViewModel(application) {
@@ -89,6 +96,26 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         if (!cur.isRunning) {
             _uiState.postValue(cur.copy(remainingMillis = minutesToMillis(durationForMode(cur.mode))))
         }
+    }
+
+    fun loadFocusChecklist(ctx: Context) {
+        val items = SettingsPrefs.loadFocusChecklist(ctx)
+        val cur = _uiState.value ?: TimerUiState()
+        val checklist = items.map { FocusCheckItem(text = it) }
+        _uiState.postValue(cur.copy(
+            focusChecklist = checklist,
+            checklistCompleted = checklist.isEmpty()
+        ))
+    }
+
+    fun toggleChecklistItem(index: Int) {
+        val cur = _uiState.value ?: return
+        val updated = cur.focusChecklist.toMutableList()
+        if (index in updated.indices) {
+            updated[index] = updated[index].copy(isChecked = !updated[index].isChecked)
+        }
+        val allChecked = updated.isEmpty() || updated.all { it.isChecked }
+        _uiState.postValue(cur.copy(focusChecklist = updated, checklistCompleted = allChecked))
     }
 
     fun toggleRunning() {
@@ -305,12 +332,17 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         val cur = _uiState.value ?: TimerUiState()
         if (cur.mode == TimerMode.REVIEW) saveCurrentReview()
         val millis = minutesToMillis(focusMinutes)
+        val checklistItems = SettingsPrefs.loadFocusChecklist(ctx)
+        val checklist = checklistItems.map { FocusCheckItem(text = it) }
+        val hasChecklist = checklist.isNotEmpty()
         _uiState.postValue(TimerUiState(
             mode = TimerMode.FOCUS,
             remainingMillis = millis,
-            isRunning = true
+            isRunning = !hasChecklist,
+            focusChecklist = checklist,
+            checklistCompleted = !hasChecklist
         ))
-        startTicker()
+        if (!hasChecklist) startTicker()
     }
 
     fun startFocusWithTask(ctx: Context, taskName: String) {
@@ -318,13 +350,18 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         val cur = _uiState.value ?: TimerUiState()
         if (cur.mode == TimerMode.REVIEW) saveCurrentReview()
         val millis = minutesToMillis(focusMinutes)
+        val checklistItems = SettingsPrefs.loadFocusChecklist(ctx)
+        val checklist = checklistItems.map { FocusCheckItem(text = it) }
+        val hasChecklist = checklist.isNotEmpty()
         _uiState.postValue(TimerUiState(
             mode = TimerMode.FOCUS,
             remainingMillis = millis,
-            isRunning = true,
-            taskName = taskName
+            isRunning = !hasChecklist,
+            taskName = taskName,
+            focusChecklist = checklist,
+            checklistCompleted = !hasChecklist
         ))
-        startTicker()
+        if (!hasChecklist) startTicker()
     }
 
     // --- Todo Tasks ---
