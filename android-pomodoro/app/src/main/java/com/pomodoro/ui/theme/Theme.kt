@@ -89,9 +89,14 @@ private val DarkColorScheme = darkColors(
 
 @Composable
 fun PomodoroTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    themeMode: ThemeMode = ThemePreference.currentTheme.value,
     content: @Composable () -> Unit
 ) {
+    val darkTheme = when (themeMode) {
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
+        ThemeMode.SYSTEM -> isSystemInDarkTheme()
+    }
     val colors = if (darkTheme) DarkColorScheme else LightColorScheme
 
     val view = LocalView.current

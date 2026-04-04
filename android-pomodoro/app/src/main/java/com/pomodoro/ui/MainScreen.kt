@@ -1,11 +1,14 @@
 package com.pomodoro.ui
 
-import android.content.Context
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,24 +21,33 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.Button
-import androidx.compose.material.ButtonDefaults
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.Card
+import androidx.compose.material.Checkbox
+import androidx.compose.material.CheckboxDefaults
 import androidx.compose.material.Icon
 import androidx.compose.material.IconButton
 import androidx.compose.material.MaterialTheme
+import androidx.compose.material.OutlinedTextField
 import androidx.compose.material.Text
+import androidx.compose.material.TextFieldDefaults
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,7 +56,9 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -53,8 +67,12 @@ import com.pomodoro.ui.theme.*
 @Composable
 fun MainScreen(viewModel: TimerViewModel = viewModel()) {
     val uiState by viewModel.uiState.observeAsState()
-    val ctx: Context = LocalContext.current
-    val isDark = isSystemInDarkTheme()
+    val ctx = LocalContext.current
+    val isDark = when (ThemePreference.currentTheme.value) {
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
+        ThemeMode.SYSTEM -> isSystemInDarkTheme()
+    }
 
     val state = uiState ?: return
 
@@ -79,22 +97,23 @@ fun MainScreen(viewModel: TimerViewModel = viewModel()) {
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colors.background)
+            .verticalScroll(rememberScrollState())
             .padding(24.dp),
-        verticalArrangement = Arrangement.SpaceBetween,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         // Top: Mode selector chips
         Spacer(modifier = Modifier.height(16.dp))
         ModeChips(currentMode = state.mode, accentColor = accentColor)
 
+        Spacer(modifier = Modifier.height(24.dp))
+
         // Center: Circular timer
         Box(
             contentAlignment = Alignment.Center,
-            modifier = Modifier.size(280.dp)
+            modifier = Modifier.size(260.dp)
         ) {
             val trackColor = if (isDark) TrackDark else TrackLight
             Canvas(modifier = Modifier.fillMaxSize()) {
-                // Background track
                 drawArc(
                     color = trackColor,
                     startAngle = -90f,
@@ -102,7 +121,6 @@ fun MainScreen(viewModel: TimerViewModel = viewModel()) {
                     useCenter = false,
                     style = Stroke(width = 12.dp.toPx(), cap = StrokeCap.Round)
                 )
-                // Progress arc
                 drawArc(
                     color = accentColor,
                     startAngle = -90f,
@@ -112,7 +130,6 @@ fun MainScreen(viewModel: TimerViewModel = viewModel()) {
                 )
             }
 
-            // Timer text inside circle
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     text = formatTime(state.remainingMillis),
@@ -130,17 +147,50 @@ fun MainScreen(viewModel: TimerViewModel = viewModel()) {
             }
         }
 
-        // Bottom: Controls
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // Task name & subtasks — visible only in FOCUS mode
+        AnimatedVisibility(
+            visible = state.mode == TimerMode.FOCUS,
+            enter = expandVertically(),
+            exit = shrinkVertically()
+        ) {
+            TaskSection(
+                taskName = state.taskName,
+                subtasks = state.subtasks,
+                accentColor = accentColor,
+                onTaskNameChange = { viewModel.updateTaskName(it) },
+                onAddSubtask = { viewModel.addSubtask(it) },
+                onToggleSubtask = { viewModel.toggleSubtask(it) },
+                onRemoveSubtask = { viewModel.removeSubtask(it) }
+            )
+        }
+
+        // Review questions — visible only in REVIEW mode
+        AnimatedVisibility(
+            visible = state.mode == TimerMode.REVIEW,
+            enter = expandVertically(),
+            exit = shrinkVertically()
+        ) {
+            ReviewSection(
+                answers = state.reviewAnswers,
+                accentColor = accentColor,
+                onAddItem = { q, text -> viewModel.addReviewItem(q, text) },
+                onRemoveItem = { q, id -> viewModel.removeReviewItem(q, id) }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // Controls
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.padding(bottom = 32.dp)
         ) {
-            // Play/Pause + Skip buttons
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
             ) {
-                // Play/Pause button (large, filled)
                 IconButton(
                     onClick = { viewModel.toggleRunning() },
                     modifier = Modifier
@@ -158,7 +208,6 @@ fun MainScreen(viewModel: TimerViewModel = viewModel()) {
 
                 Spacer(modifier = Modifier.width(24.dp))
 
-                // Skip to next mode
                 IconButton(
                     onClick = {
                         when (state.mode) {
@@ -183,29 +232,337 @@ fun MainScreen(viewModel: TimerViewModel = viewModel()) {
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Next mode label
             Text(
                 text = nextModeLabel(state.mode),
                 style = MaterialTheme.typography.caption,
                 color = MaterialTheme.colors.onBackground.copy(alpha = 0.5f)
             )
+        }
+    }
+}
 
-            Spacer(modifier = Modifier.height(16.dp))
+@Composable
+private fun TaskSection(
+    taskName: String,
+    subtasks: List<Subtask>,
+    accentColor: Color,
+    onTaskNameChange: (String) -> Unit,
+    onAddSubtask: (String) -> Unit,
+    onToggleSubtask: (Long) -> Unit,
+    onRemoveSubtask: (Long) -> Unit
+) {
+    var newSubtaskText by remember { mutableStateOf("") }
 
-            // Settings button
+    Column(modifier = Modifier.fillMaxWidth()) {
+        // Task name input
+        OutlinedTextField(
+            value = taskName,
+            onValueChange = onTaskNameChange,
+            placeholder = {
+                Text(
+                    "What are you working on?",
+                    color = MaterialTheme.colors.onSurface.copy(alpha = 0.35f)
+                )
+            },
+            singleLine = true,
+            shape = RoundedCornerShape(14.dp),
+            colors = TextFieldDefaults.outlinedTextFieldColors(
+                focusedBorderColor = accentColor,
+                unfocusedBorderColor = MaterialTheme.colors.onSurface.copy(alpha = 0.15f),
+                textColor = MaterialTheme.colors.onSurface,
+                cursorColor = accentColor,
+                backgroundColor = MaterialTheme.colors.surface
+            ),
+            textStyle = MaterialTheme.typography.body1.copy(fontWeight = FontWeight.Medium),
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Subtask list
+        subtasks.forEach { subtask ->
+            SubtaskRow(
+                subtask = subtask,
+                accentColor = accentColor,
+                onToggle = { onToggleSubtask(subtask.id) },
+                onRemove = { onRemoveSubtask(subtask.id) }
+            )
+        }
+
+        // Add subtask input
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value = newSubtaskText,
+                onValueChange = { newSubtaskText = it },
+                placeholder = {
+                    Text(
+                        "Add a subtask...",
+                        color = MaterialTheme.colors.onSurface.copy(alpha = 0.3f),
+                        style = MaterialTheme.typography.body2
+                    )
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                colors = TextFieldDefaults.outlinedTextFieldColors(
+                    focusedBorderColor = accentColor.copy(alpha = 0.5f),
+                    unfocusedBorderColor = MaterialTheme.colors.onSurface.copy(alpha = 0.1f),
+                    textColor = MaterialTheme.colors.onSurface,
+                    cursorColor = accentColor,
+                    backgroundColor = MaterialTheme.colors.surface
+                ),
+                textStyle = MaterialTheme.typography.body2,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(
+                    onDone = {
+                        if (newSubtaskText.isNotBlank()) {
+                            onAddSubtask(newSubtaskText.trim())
+                            newSubtaskText = ""
+                        }
+                    }
+                ),
+                modifier = Modifier.weight(1f)
+            )
+
+            Spacer(modifier = Modifier.width(8.dp))
+
             IconButton(
-                onClick = { openSettings(ctx, viewModel) },
+                onClick = {
+                    if (newSubtaskText.isNotBlank()) {
+                        onAddSubtask(newSubtaskText.trim())
+                        newSubtaskText = ""
+                    }
+                },
                 modifier = Modifier
-                    .size(44.dp)
+                    .size(40.dp)
                     .clip(CircleShape)
-                    .background(MaterialTheme.colors.surface)
+                    .background(accentColor.copy(alpha = 0.15f))
             ) {
                 Icon(
-                    imageVector = Icons.Default.Settings,
-                    contentDescription = "Settings",
-                    tint = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
-                    modifier = Modifier.size(22.dp)
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "Add subtask",
+                    tint = accentColor,
+                    modifier = Modifier.size(20.dp)
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SubtaskRow(
+    subtask: Subtask,
+    accentColor: Color,
+    onToggle: () -> Unit,
+    onRemove: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onToggle)
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Checkbox(
+            checked = subtask.isDone,
+            onCheckedChange = { onToggle() },
+            colors = CheckboxDefaults.colors(
+                checkedColor = accentColor,
+                uncheckedColor = MaterialTheme.colors.onSurface.copy(alpha = 0.3f),
+                checkmarkColor = Color.White
+            )
+        )
+
+        Text(
+            text = subtask.text,
+            style = MaterialTheme.typography.body2,
+            color = if (subtask.isDone)
+                MaterialTheme.colors.onSurface.copy(alpha = 0.4f)
+            else
+                MaterialTheme.colors.onSurface,
+            textDecoration = if (subtask.isDone) TextDecoration.LineThrough else TextDecoration.None,
+            modifier = Modifier.weight(1f)
+        )
+
+        IconButton(
+            onClick = onRemove,
+            modifier = Modifier.size(32.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Close,
+                contentDescription = "Remove subtask",
+                tint = MaterialTheme.colors.onSurface.copy(alpha = 0.3f),
+                modifier = Modifier.size(16.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun ReviewSection(
+    answers: ReviewAnswers,
+    accentColor: Color,
+    onAddItem: (ReviewQuestion, String) -> Unit,
+    onRemoveItem: (ReviewQuestion, Long) -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        ReviewQuestionCard(
+            emoji = "\u2705",
+            title = "What went well?",
+            items = answers.wentWell,
+            accentColor = accentColor,
+            onAdd = { onAddItem(ReviewQuestion.WENT_WELL, it) },
+            onRemove = { onRemoveItem(ReviewQuestion.WENT_WELL, it) }
+        )
+
+        ReviewQuestionCard(
+            emoji = "\u26A0\uFE0F",
+            title = "What didn't go well?",
+            items = answers.didntGoWell,
+            accentColor = accentColor,
+            onAdd = { onAddItem(ReviewQuestion.DIDNT_GO_WELL, it) },
+            onRemove = { onRemoveItem(ReviewQuestion.DIDNT_GO_WELL, it) }
+        )
+
+        ReviewQuestionCard(
+            emoji = "\uD83D\uDCA1",
+            title = "Improvements for next time?",
+            items = answers.improvements,
+            accentColor = accentColor,
+            onAdd = { onAddItem(ReviewQuestion.IMPROVEMENTS, it) },
+            onRemove = { onRemoveItem(ReviewQuestion.IMPROVEMENTS, it) }
+        )
+    }
+}
+
+@Composable
+private fun ReviewQuestionCard(
+    emoji: String,
+    title: String,
+    items: List<ReviewItem>,
+    accentColor: Color,
+    onAdd: (String) -> Unit,
+    onRemove: (Long) -> Unit
+) {
+    var inputText by remember { mutableStateOf("") }
+
+    Card(
+        backgroundColor = MaterialTheme.colors.surface,
+        shape = RoundedCornerShape(16.dp),
+        elevation = 1.dp,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(text = emoji, fontSize = 18.sp)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.subtitle2,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colors.onSurface
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Existing items
+            items.forEach { item ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "\u2022",
+                        color = accentColor,
+                        fontSize = 16.sp,
+                        modifier = Modifier.padding(start = 4.dp, end = 10.dp)
+                    )
+                    Text(
+                        text = item.text,
+                        style = MaterialTheme.typography.body2,
+                        color = MaterialTheme.colors.onSurface,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(
+                        onClick = { onRemove(item.id) },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Remove",
+                            tint = MaterialTheme.colors.onSurface.copy(alpha = 0.3f),
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+            }
+
+            // Add input
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = inputText,
+                    onValueChange = { inputText = it },
+                    placeholder = {
+                        Text(
+                            "Add an item...",
+                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.3f),
+                            style = MaterialTheme.typography.body2
+                        )
+                    },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = TextFieldDefaults.outlinedTextFieldColors(
+                        focusedBorderColor = accentColor.copy(alpha = 0.5f),
+                        unfocusedBorderColor = MaterialTheme.colors.onSurface.copy(alpha = 0.1f),
+                        textColor = MaterialTheme.colors.onSurface,
+                        cursorColor = accentColor
+                    ),
+                    textStyle = MaterialTheme.typography.body2,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(
+                        onDone = {
+                            if (inputText.isNotBlank()) {
+                                onAdd(inputText.trim())
+                                inputText = ""
+                            }
+                        }
+                    ),
+                    modifier = Modifier.weight(1f)
+                )
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                IconButton(
+                    onClick = {
+                        if (inputText.isNotBlank()) {
+                            onAdd(inputText.trim())
+                            inputText = ""
+                        }
+                    },
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(accentColor.copy(alpha = 0.15f))
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Add",
+                        tint = accentColor,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
         }
     }
@@ -276,8 +633,4 @@ private fun formatTime(ms: Long): String {
     val min = totalSec / 60
     val sec = totalSec % 60
     return "%02d:%02d".format(min, sec)
-}
-
-private fun openSettings(ctx: Context, viewModel: TimerViewModel) {
-    SettingsScreen.show(ctx, viewModel)
 }
