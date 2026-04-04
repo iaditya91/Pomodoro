@@ -12,6 +12,8 @@ import com.pomodoro.BackupSettings
 import com.pomodoro.DriveBackupHelper
 import com.pomodoro.MiniTaskGenerator
 import com.pomodoro.NotificationHelper
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -94,9 +96,38 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
     private var reviewMinutes = 5
     private var breakMinutes = 15
 
+    private val prefs = application.getSharedPreferences("pomodoro_prefs", Context.MODE_PRIVATE)
+    private val gson = Gson()
+
     init {
         NotificationHelper.createChannel(application)
         _uiState.value = TimerUiState(remainingMillis = minutesToMillis(focusMinutes))
+        loadPersistedData()
+        _savedNotes.observeForever { persistNotes(it) }
+        _todoTasks.observeForever { persistTodos(it) }
+    }
+
+    private fun loadPersistedData() {
+        prefs.getString("saved_notes", null)?.let { json ->
+            try {
+                val type = object : TypeToken<List<SavedReviewNote>>() {}.type
+                _savedNotes.value = gson.fromJson(json, type)
+            } catch (_: Exception) {}
+        }
+        prefs.getString("todo_tasks", null)?.let { json ->
+            try {
+                val type = object : TypeToken<List<TodoTask>>() {}.type
+                _todoTasks.value = gson.fromJson(json, type)
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun persistNotes(notes: List<SavedReviewNote>) {
+        prefs.edit().putString("saved_notes", gson.toJson(notes)).apply()
+    }
+
+    private fun persistTodos(todos: List<TodoTask>) {
+        prefs.edit().putString("todo_tasks", gson.toJson(todos)).apply()
     }
 
     fun reloadDurations(ctx: Context) {

@@ -81,9 +81,9 @@ fun MainScreen(viewModel: TimerViewModel = viewModel()) {
 
     val state = uiState ?: return
 
-    // Load checklist on first composition only
-    LaunchedEffect(Unit) {
-        if (state.mode == TimerMode.FOCUS && !state.isRunning && state.focusChecklist.isEmpty()) {
+    // Reload checklist every time this screen composes (e.g. after settings change)
+    LaunchedEffect(state.mode, state.isRunning) {
+        if (state.mode == TimerMode.FOCUS && !state.isRunning) {
             viewModel.loadFocusChecklist(ctx)
         }
     }

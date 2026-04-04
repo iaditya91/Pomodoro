@@ -6,6 +6,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -60,7 +61,10 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material.Switch
+import androidx.compose.material.SwitchDefaults
 import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.pomodoro.AutoBackupWorker
 import com.pomodoro.DriveBackupHelper
 import com.pomodoro.ui.theme.ThemeMode
 import com.pomodoro.ui.theme.ThemePreference
@@ -451,6 +455,7 @@ private fun BackupSection(ctx: Context, viewModel: TimerViewModel) {
 
     var isSignedIn by remember { mutableStateOf(DriveBackupHelper.isSignedIn(ctx)) }
     var accountEmail by remember { mutableStateOf(DriveBackupHelper.getAccountEmail(ctx)) }
+    var autoBackupEnabled by remember { mutableStateOf(AutoBackupWorker.isEnabled(ctx)) }
 
     // Pending action after sign-in
     var pendingAction by remember { mutableStateOf<String?>(null) }
@@ -467,6 +472,10 @@ private fun BackupSection(ctx: Context, viewModel: TimerViewModel) {
                 when (pendingAction) {
                     "backup" -> viewModel.backupToDrive(ctx)
                     "restore" -> viewModel.restoreFromDrive(ctx)
+                    "enable_auto_backup" -> {
+                        autoBackupEnabled = true
+                        AutoBackupWorker.setEnabled(ctx, true)
+                    }
                 }
                 pendingAction = null
             } catch (_: Exception) {
@@ -527,60 +536,95 @@ private fun BackupSection(ctx: Context, viewModel: TimerViewModel) {
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Backup button
-            Button(
-                onClick = {
-                    if (isSignedIn) viewModel.backupToDrive(ctx)
-                    else signInThen("backup")
-                },
-                enabled = backupStatus != TimerViewModel.BackupStatus.LOADING,
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(
-                    backgroundColor = MaterialTheme.colors.primary,
-                    contentColor = MaterialTheme.colors.onPrimary
-                ),
-                modifier = Modifier.fillMaxWidth()
+            // Backup & Restore buttons side by side
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                if (backupStatus == TimerViewModel.BackupStatus.LOADING) {
-                    CircularProgressIndicator(
-                        color = MaterialTheme.colors.onPrimary,
-                        strokeWidth = 2.dp,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                } else {
-                    Icon(
-                        imageVector = Icons.Default.CloudUpload,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
+                Button(
+                    onClick = {
+                        if (isSignedIn) viewModel.backupToDrive(ctx)
+                        else signInThen("backup")
+                    },
+                    enabled = backupStatus != TimerViewModel.BackupStatus.LOADING,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = MaterialTheme.colors.primary,
+                        contentColor = MaterialTheme.colors.onPrimary
+                    ),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    if (backupStatus == TimerViewModel.BackupStatus.LOADING) {
+                        CircularProgressIndicator(
+                            color = MaterialTheme.colors.onPrimary,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.CloudUpload,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Backup")
                 }
-                Text("Backup to Drive")
+
+                OutlinedButton(
+                    onClick = {
+                        if (isSignedIn) viewModel.restoreFromDrive(ctx)
+                        else signInThen("restore")
+                    },
+                    enabled = backupStatus != TimerViewModel.BackupStatus.LOADING,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CloudDownload,
+                        contentDescription = null,
+                        tint = MaterialTheme.colors.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Restore", color = MaterialTheme.colors.primary)
+                }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // Restore button
-            OutlinedButton(
-                onClick = {
-                    if (isSignedIn) viewModel.restoreFromDrive(ctx)
-                    else signInThen("restore")
-                },
-                enabled = backupStatus != TimerViewModel.BackupStatus.LOADING,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth()
+            // Auto-backup toggle
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = Icons.Default.CloudDownload,
-                    contentDescription = null,
-                    tint = MaterialTheme.colors.primary,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    "Restore from Drive",
-                    color = MaterialTheme.colors.primary
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Auto backup",
+                        style = MaterialTheme.typography.body2,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colors.onSurface
+                    )
+                    Text(
+                        text = "Daily at 2:00 AM",
+                        style = MaterialTheme.typography.caption,
+                        color = MaterialTheme.colors.onSurface.copy(alpha = 0.5f)
+                    )
+                }
+                Switch(
+                    checked = autoBackupEnabled,
+                    onCheckedChange = { enabled ->
+                        if (enabled && !isSignedIn) {
+                            signInThen("enable_auto_backup")
+                        } else {
+                            autoBackupEnabled = enabled
+                            AutoBackupWorker.setEnabled(ctx, enabled)
+                        }
+                    },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = MaterialTheme.colors.primary,
+                        checkedTrackColor = MaterialTheme.colors.primary.copy(alpha = 0.5f)
+                    )
                 )
             }
 
