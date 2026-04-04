@@ -45,6 +45,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -183,15 +184,15 @@ fun TodoScreen(
                     } else {
                         todayTasks.forEach { task ->
                             Spacer(modifier = Modifier.height(8.dp))
-                            TodoTaskCard(
+                            TodayTaskCard(
                                 task = task,
+                                onToggleDone = { viewModel.toggleTodoDone(task.id) },
                                 onPlay = {
                                     viewModel.startFocusWithTask(ctx, task.text)
                                     onStartTask()
                                 },
                                 onDelete = { viewModel.removeTodoTask(task.id) },
-                                onMove = { viewModel.moveTodoToPlanned(task.id) },
-                                moveLabel = "Move to Planned"
+                                onMove = { viewModel.moveTodoToPlanned(task.id) }
                             )
                         }
                     }
@@ -224,15 +225,14 @@ fun TodoScreen(
                     } else {
                         plannedTasks.forEach { task ->
                             Spacer(modifier = Modifier.height(8.dp))
-                            TodoTaskCard(
+                            PlannedTaskCard(
                                 task = task,
                                 onPlay = {
                                     viewModel.startFocusWithTask(ctx, task.text)
                                     onStartTask()
                                 },
                                 onDelete = { viewModel.removeTodoTask(task.id) },
-                                onMove = { viewModel.moveTodoToToday(task.id) },
-                                moveLabel = "Move to Today"
+                                onMove = { viewModel.moveTodoToToday(task.id) }
                             )
                         }
                     }
@@ -312,12 +312,88 @@ private fun EmptyTodoPlaceholder() {
 }
 
 @Composable
-private fun TodoTaskCard(
+private fun TodayTaskCard(
+    task: TodoTask,
+    onToggleDone: () -> Unit,
+    onPlay: () -> Unit,
+    onDelete: () -> Unit,
+    onMove: () -> Unit
+) {
+    Card(
+        backgroundColor = MaterialTheme.colors.surface,
+        shape = RoundedCornerShape(16.dp),
+        elevation = 1.dp,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .clickable { onToggleDone() }
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = task.text,
+                    style = MaterialTheme.typography.body1.copy(
+                        textDecoration = if (task.isDone) TextDecoration.LineThrough else TextDecoration.None
+                    ),
+                    color = if (task.isDone)
+                        MaterialTheme.colors.onSurface.copy(alpha = 0.4f)
+                    else
+                        MaterialTheme.colors.onSurface,
+                    modifier = Modifier.weight(1f)
+                )
+
+                if (!task.isDone) {
+                    IconButton(
+                        onClick = onPlay,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = "Start focus session",
+                            tint = MaterialTheme.colors.primary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(4.dp))
+                }
+
+                IconButton(
+                    onClick = onDelete,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Delete task",
+                        tint = MaterialTheme.colors.onSurface.copy(alpha = 0.35f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            if (!task.isDone) {
+                Text(
+                    text = "Move to Planned",
+                    style = MaterialTheme.typography.caption,
+                    color = MaterialTheme.colors.primary,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .clickable { onMove() }
+                        .padding(start = 16.dp, end = 16.dp, bottom = 10.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlannedTaskCard(
     task: TodoTask,
     onPlay: () -> Unit,
     onDelete: () -> Unit,
-    onMove: () -> Unit,
-    moveLabel: String
+    onMove: () -> Unit
 ) {
     Card(
         backgroundColor = MaterialTheme.colors.surface,
@@ -364,9 +440,9 @@ private fun TodoTaskCard(
                 }
             }
 
-            // Move option
+            // Move to Today option
             Text(
-                text = moveLabel,
+                text = "Move to Today",
                 style = MaterialTheme.typography.caption,
                 color = MaterialTheme.colors.primary,
                 fontWeight = FontWeight.Medium,

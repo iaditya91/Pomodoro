@@ -68,8 +68,15 @@ import com.pomodoro.AutoBackupWorker
 import com.pomodoro.DriveBackupHelper
 import com.pomodoro.ui.theme.ThemeMode
 import com.pomodoro.ui.theme.ThemePreference
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+
+data class ChecklistStorageItem(
+    val text: String,
+    val isActive: Boolean = true
+)
 
 object SettingsPrefs {
     private const val PREFS = "pomodoro_prefs"
@@ -78,6 +85,8 @@ object SettingsPrefs {
     private const val KEY_BREAK = "break_minutes"
     private const val KEY_FOCUS_CHECKLIST = "focus_checklist"
     private const val KEY_CHECKLIST_MODE = "checklist_mode"
+
+    private val gson = Gson()
 
     fun loadPrefs(ctx: Context): Triple<Int, Int, Int> {
         val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -97,18 +106,34 @@ object SettingsPrefs {
             .apply()
     }
 
-    fun loadFocusChecklistItems(ctx: Context): List<String> {
+    fun loadFocusChecklistStorage(ctx: Context): List<ChecklistStorageItem> {
         val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val raw = prefs.getString(KEY_FOCUS_CHECKLIST, "") ?: ""
         if (raw.isBlank()) return emptyList()
-        return raw.split("\n").filter { it.isNotBlank() }
+        return try {
+            val type = object : TypeToken<List<ChecklistStorageItem>>() {}.type
+            gson.fromJson(raw, type)
+        } catch (_: Exception) {
+            // Backward compat: old newline-separated format
+            raw.split("\n").filter { it.isNotBlank() }.map { ChecklistStorageItem(it, true) }
+        }
     }
 
-    fun saveFocusChecklistItems(ctx: Context, items: List<String>) {
+    fun saveFocusChecklistStorage(ctx: Context, items: List<ChecklistStorageItem>) {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
-            .putString(KEY_FOCUS_CHECKLIST, items.joinToString("\n"))
+            .putString(KEY_FOCUS_CHECKLIST, gson.toJson(items))
             .apply()
+    }
+
+    /** Returns only active item texts – used by timer and backup */
+    fun loadFocusChecklistItems(ctx: Context): List<String> {
+        return loadFocusChecklistStorage(ctx).filter { it.isActive }.map { it.text }
+    }
+
+    /** Overwrites storage from plain strings (all active) – used by restore */
+    fun saveFocusChecklistItems(ctx: Context, items: List<String>) {
+        saveFocusChecklistStorage(ctx, items.map { ChecklistStorageItem(it, true) })
     }
 
     fun loadChecklistMode(ctx: Context): CheckItemMode {
@@ -254,13 +279,15 @@ fun SettingsScreen(
 
 @Composable
 private fun FocusChecklistSection(ctx: Context) {
-    var items by remember { mutableStateOf(SettingsPrefs.loadFocusChecklistItems(ctx)) }
+    var items by remember { mutableStateOf(SettingsPrefs.loadFocusChecklistStorage(ctx)) }
     var mode by remember { mutableStateOf(SettingsPrefs.loadChecklistMode(ctx)) }
     var newItemText by remember { mutableStateOf("") }
+    var editingIndex by remember { mutableStateOf(-1) }
+    var editingText by remember { mutableStateOf("") }
 
-    fun saveItems(updated: List<String>) {
+    fun saveItems(updated: List<ChecklistStorageItem>) {
         items = updated
-        SettingsPrefs.saveFocusChecklistItems(ctx, updated)
+        SettingsPrefs.saveFocusChecklistStorage(ctx, updated)
     }
 
     Card(
@@ -349,34 +376,100 @@ private fun FocusChecklistSection(ctx: Context) {
             Spacer(modifier = Modifier.height(12.dp))
 
             items.forEachIndexed { index, item ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "\u2022",
-                        color = MaterialTheme.colors.primary,
-                        fontSize = 16.sp,
-                        modifier = Modifier.padding(start = 4.dp, end = 10.dp)
-                    )
-                    Text(
-                        text = item,
-                        style = MaterialTheme.typography.body2,
-                        color = MaterialTheme.colors.onSurface,
-                        modifier = Modifier.weight(1f)
-                    )
-                    IconButton(
-                        onClick = { saveItems(items.toMutableList().also { it.removeAt(index) }) },
-                        modifier = Modifier.size(28.dp)
+                if (editingIndex == index) {
+                    // Inline edit mode
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Remove",
-                            tint = MaterialTheme.colors.onSurface.copy(alpha = 0.35f),
-                            modifier = Modifier.size(16.dp)
+                        OutlinedTextField(
+                            value = editingText,
+                            onValueChange = { editingText = it },
+                            singleLine = true,
+                            shape = RoundedCornerShape(10.dp),
+                            colors = TextFieldDefaults.outlinedTextFieldColors(
+                                focusedBorderColor = MaterialTheme.colors.primary,
+                                unfocusedBorderColor = MaterialTheme.colors.onSurface.copy(alpha = 0.15f),
+                                textColor = MaterialTheme.colors.onSurface,
+                                cursorColor = MaterialTheme.colors.primary
+                            ),
+                            textStyle = MaterialTheme.typography.body2,
+                            keyboardOptions = KeyboardOptions(
+                                capitalization = KeyboardCapitalization.Sentences,
+                                imeAction = ImeAction.Done
+                            ),
+                            keyboardActions = KeyboardActions(
+                                onDone = {
+                                    if (editingText.isNotBlank()) {
+                                        saveItems(items.toMutableList().also {
+                                            it[index] = it[index].copy(text = editingText.trim())
+                                        })
+                                    }
+                                    editingIndex = -1
+                                }
+                            ),
+                            modifier = Modifier.weight(1f)
                         )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        TextButton(onClick = {
+                            if (editingText.isNotBlank()) {
+                                saveItems(items.toMutableList().also {
+                                    it[index] = it[index].copy(text = editingText.trim())
+                                })
+                            }
+                            editingIndex = -1
+                        }) {
+                            Text("Done", color = MaterialTheme.colors.primary,
+                                style = MaterialTheme.typography.body2,
+                                fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Active/Inactive toggle
+                        Switch(
+                            checked = item.isActive,
+                            onCheckedChange = { checked ->
+                                saveItems(items.toMutableList().also {
+                                    it[index] = it[index].copy(isActive = checked)
+                                })
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = MaterialTheme.colors.primary,
+                                uncheckedThumbColor = MaterialTheme.colors.onSurface.copy(alpha = 0.3f)
+                            ),
+                            modifier = Modifier.padding(end = 8.dp)
+                        )
+                        Text(
+                            text = item.text,
+                            style = MaterialTheme.typography.body2,
+                            color = if (item.isActive) MaterialTheme.colors.onSurface
+                                else MaterialTheme.colors.onSurface.copy(alpha = 0.35f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable {
+                                    editingIndex = index
+                                    editingText = item.text
+                                }
+                        )
+                        IconButton(
+                            onClick = { saveItems(items.toMutableList().also { it.removeAt(index) }) },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Remove",
+                                tint = MaterialTheme.colors.onSurface.copy(alpha = 0.35f),
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -413,7 +506,7 @@ private fun FocusChecklistSection(ctx: Context) {
                     keyboardActions = KeyboardActions(
                         onDone = {
                             if (newItemText.isNotBlank()) {
-                                saveItems(items + newItemText.trim())
+                                saveItems(items + ChecklistStorageItem(newItemText.trim()))
                                 newItemText = ""
                             }
                         }
@@ -426,7 +519,7 @@ private fun FocusChecklistSection(ctx: Context) {
                 IconButton(
                     onClick = {
                         if (newItemText.isNotBlank()) {
-                            saveItems(items + newItemText.trim())
+                            saveItems(items + ChecklistStorageItem(newItemText.trim()))
                             newItemText = ""
                         }
                     },

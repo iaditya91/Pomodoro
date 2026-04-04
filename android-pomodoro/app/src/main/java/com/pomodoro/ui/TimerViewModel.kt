@@ -23,6 +23,8 @@ enum class TimerMode { FOCUS, REVIEW, BREAK }
 data class Subtask(
     val id: Long = System.nanoTime(),
     val text: String = "",
+    val description: String = "",
+    val minutes: Int = 0,
     val isDone: Boolean = false
 )
 
@@ -51,12 +53,15 @@ enum class TodoSection { TODAY, PLANNED }
 data class TodoTask(
     val id: Long = System.nanoTime(),
     val text: String = "",
-    val section: TodoSection = TodoSection.PLANNED
+    val section: TodoSection = TodoSection.PLANNED,
+    val isDone: Boolean = false
 )
 
 data class RoutineSubtask(
     val id: Long = System.nanoTime(),
-    val text: String = ""
+    val text: String = "",
+    val description: String = "",
+    val minutes: Int = 0
 )
 
 data class Routine(
@@ -514,6 +519,13 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         })
     }
 
+    fun toggleTodoDone(id: Long) {
+        val existing = _todoTasks.value ?: return
+        _todoTasks.postValue(existing.map {
+            if (it.id == id) it.copy(isDone = !it.isDone) else it
+        })
+    }
+
     // --- Routines ---
 
     fun addRoutine(routine: Routine) {
@@ -549,7 +561,7 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         val millis = minutesToMillis(focusMinutes)
         val checklist = buildChecklist(ctx)
         val hasChecklist = checklist.isNotEmpty()
-        val subtasks = routine.subtasks.map { Subtask(text = it.text) }
+        val subtasks = routine.subtasks.map { Subtask(text = it.text, description = it.description, minutes = it.minutes) }
         _uiState.postValue(TimerUiState(
             mode = TimerMode.FOCUS,
             remainingMillis = millis,

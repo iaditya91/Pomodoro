@@ -16,8 +16,6 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.Card
-import androidx.compose.material.Checkbox
-import androidx.compose.material.CheckboxDefaults
 import androidx.compose.material.Divider
 import androidx.compose.material.Icon
 import androidx.compose.material.IconButton
@@ -30,9 +28,11 @@ import androidx.compose.material.TextButton
 import androidx.compose.material.TextFieldDefaults
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -49,6 +49,13 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.zIndex
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 
 @Composable
 fun RoutinesScreen(
@@ -243,12 +250,29 @@ private fun RoutineCard(
                 Divider(color = MaterialTheme.colors.onSurface.copy(alpha = 0.08f))
                 Spacer(modifier = Modifier.height(8.dp))
                 routine.subtasks.forEach { subtask ->
-                    Text(
-                        text = "\u2022 ${subtask.text}",
-                        style = MaterialTheme.typography.body2,
-                        color = MaterialTheme.colors.onSurface.copy(alpha = 0.7f),
-                        modifier = Modifier.padding(vertical = 2.dp, horizontal = 4.dp)
-                    )
+                    Column(modifier = Modifier.padding(vertical = 3.dp, horizontal = 4.dp)) {
+                        Text(
+                            text = "\u2022 ${subtask.text}",
+                            style = MaterialTheme.typography.body1.copy(fontSize = 15.sp),
+                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.8f)
+                        )
+                        if (subtask.description.isNotBlank()) {
+                            Text(
+                                text = "  ${subtask.description}",
+                                style = MaterialTheme.typography.caption,
+                                color = MaterialTheme.colors.onSurface.copy(alpha = 0.45f),
+                                modifier = Modifier.padding(start = 10.dp)
+                            )
+                        }
+                        if (subtask.minutes > 0) {
+                            Text(
+                                text = "  ${subtask.minutes} min",
+                                style = MaterialTheme.typography.caption,
+                                color = MaterialTheme.colors.primary.copy(alpha = 0.6f),
+                                modifier = Modifier.padding(start = 10.dp)
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -263,10 +287,19 @@ private fun RoutineForm(
 ) {
     val isEdit = initial != null
     var name by remember { mutableStateOf(initial?.name ?: "") }
-    var subtaskTexts by remember {
-        mutableStateOf<List<String>>(initial?.subtasks?.map { it.text } ?: emptyList())
+    var subtaskItems by remember {
+        mutableStateOf(initial?.subtasks ?: emptyList())
     }
     var newSubtask by remember { mutableStateOf("") }
+    var editingIndex by remember { mutableStateOf(-1) }
+    var editingText by remember { mutableStateOf("") }
+    var editingDesc by remember { mutableStateOf("") }
+    var editingMins by remember { mutableStateOf("") }
+    var expandedIndex by remember { mutableStateOf(-1) }
+    var dragIndex by remember { mutableStateOf(-1) }
+    var dragOffset by remember { mutableStateOf(0f) }
+    val itemHeights = remember { mutableStateMapOf<Int, Int>() }
+    val density = LocalDensity.current
     var useDefaults by remember { mutableStateOf(initial?.useDefaultSettings ?: true) }
     var focusMin by remember { mutableStateOf((initial?.focusMinutes ?: 25).toString()) }
     var reviewMin by remember { mutableStateOf((initial?.reviewMinutes ?: 5).toString()) }
@@ -319,27 +352,206 @@ private fun RoutineForm(
             )
             Spacer(modifier = Modifier.height(6.dp))
 
-            subtaskTexts.forEachIndexed { index, text ->
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "\u2022 $text",
-                        style = MaterialTheme.typography.body2,
-                        color = MaterialTheme.colors.onSurface,
-                        modifier = Modifier.weight(1f)
-                    )
-                    IconButton(
-                        onClick = { subtaskTexts = subtaskTexts.toMutableList().also { it.removeAt(index) } },
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Remove",
-                            tint = MaterialTheme.colors.onSurface.copy(alpha = 0.3f),
-                            modifier = Modifier.size(14.dp)
+            subtaskItems.forEachIndexed { index, item ->
+                val isDragging = dragIndex == index
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onGloballyPositioned { itemHeights[index] = it.size.height }
+                        .graphicsLayer {
+                            if (isDragging) {
+                                translationY = dragOffset
+                                shadowElevation = 8f
+                            }
+                        }
+                        .zIndex(if (isDragging) 1f else 0f)
+                        .background(
+                            if (isDragging) MaterialTheme.colors.surface else MaterialTheme.colors.surface.copy(alpha = 0f),
+                            RoundedCornerShape(8.dp)
                         )
+                        .padding(vertical = 4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Drag handle
+                        Icon(
+                            imageVector = Icons.Default.Menu,
+                            contentDescription = "Drag to reorder",
+                            tint = MaterialTheme.colors.onSurface.copy(alpha = 0.3f),
+                            modifier = Modifier
+                                .size(24.dp)
+                                .pointerInput(index) {
+                                    detectVerticalDragGestures(
+                                        onDragStart = {
+                                            dragIndex = index
+                                            dragOffset = 0f
+                                        },
+                                        onDragEnd = {
+                                            dragIndex = -1
+                                            dragOffset = 0f
+                                        },
+                                        onDragCancel = {
+                                            dragIndex = -1
+                                            dragOffset = 0f
+                                        },
+                                        onVerticalDrag = { _, dragAmount ->
+                                            dragOffset += dragAmount
+                                            val currentIdx = dragIndex
+                                            if (currentIdx < 0) return@detectVerticalDragGestures
+                                            val h = itemHeights[currentIdx] ?: return@detectVerticalDragGestures
+                                            if (dragOffset > h * 0.6f && currentIdx < subtaskItems.size - 1) {
+                                                subtaskItems = subtaskItems.toMutableList().also {
+                                                    val moved = it.removeAt(currentIdx)
+                                                    it.add(currentIdx + 1, moved)
+                                                }
+                                                dragIndex = currentIdx + 1
+                                                dragOffset -= h
+                                                if (editingIndex == currentIdx) editingIndex = currentIdx + 1
+                                                else if (editingIndex == currentIdx + 1) editingIndex = currentIdx
+                                            } else if (dragOffset < -h * 0.6f && currentIdx > 0) {
+                                                subtaskItems = subtaskItems.toMutableList().also {
+                                                    val moved = it.removeAt(currentIdx)
+                                                    it.add(currentIdx - 1, moved)
+                                                }
+                                                dragIndex = currentIdx - 1
+                                                dragOffset += h
+                                                if (editingIndex == currentIdx) editingIndex = currentIdx - 1
+                                                else if (editingIndex == currentIdx - 1) editingIndex = currentIdx
+                                            }
+                                        }
+                                    )
+                                }
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        if (editingIndex == index) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                OutlinedTextField(
+                                    value = editingText,
+                                    onValueChange = { editingText = it },
+                                    placeholder = { Text("Task name", style = MaterialTheme.typography.body1) },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(8.dp),
+                                    textStyle = MaterialTheme.typography.body1.copy(fontSize = 15.sp),
+                                    colors = TextFieldDefaults.outlinedTextFieldColors(
+                                        focusedBorderColor = MaterialTheme.colors.primary,
+                                        unfocusedBorderColor = MaterialTheme.colors.onSurface.copy(alpha = 0.15f),
+                                        textColor = MaterialTheme.colors.onSurface,
+                                        cursorColor = MaterialTheme.colors.primary
+                                    ),
+                                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                OutlinedTextField(
+                                    value = editingDesc,
+                                    onValueChange = { editingDesc = it },
+                                    placeholder = { Text("Description (optional)", style = MaterialTheme.typography.caption) },
+                                    singleLine = false,
+                                    maxLines = 3,
+                                    shape = RoundedCornerShape(8.dp),
+                                    textStyle = MaterialTheme.typography.body2,
+                                    colors = TextFieldDefaults.outlinedTextFieldColors(
+                                        focusedBorderColor = MaterialTheme.colors.primary.copy(alpha = 0.5f),
+                                        unfocusedBorderColor = MaterialTheme.colors.onSurface.copy(alpha = 0.1f),
+                                        textColor = MaterialTheme.colors.onSurface,
+                                        cursorColor = MaterialTheme.colors.primary
+                                    ),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                OutlinedTextField(
+                                    value = editingMins,
+                                    onValueChange = { v -> editingMins = v.filter { it.isDigit() } },
+                                    placeholder = { Text("Time in minutes (optional)", style = MaterialTheme.typography.caption) },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(8.dp),
+                                    textStyle = MaterialTheme.typography.body2,
+                                    colors = TextFieldDefaults.outlinedTextFieldColors(
+                                        focusedBorderColor = MaterialTheme.colors.primary.copy(alpha = 0.5f),
+                                        unfocusedBorderColor = MaterialTheme.colors.onSurface.copy(alpha = 0.1f),
+                                        textColor = MaterialTheme.colors.onSurface,
+                                        cursorColor = MaterialTheme.colors.primary
+                                    ),
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                TextButton(
+                                    onClick = {
+                                        if (editingText.isNotBlank()) {
+                                            subtaskItems = subtaskItems.toMutableList().also {
+                                                it[index] = RoutineSubtask(
+                                                    text = editingText.trim(),
+                                                    description = editingDesc.trim(),
+                                                    minutes = editingMins.toIntOrNull() ?: 0
+                                                )
+                                            }
+                                        }
+                                        editingIndex = -1
+                                    }
+                                ) {
+                                    Text("Done", color = MaterialTheme.colors.primary, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        } else {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = item.text,
+                                    style = MaterialTheme.typography.body1.copy(fontSize = 15.sp),
+                                    color = MaterialTheme.colors.onSurface
+                                )
+                                if (item.description.isNotBlank()) {
+                                    Text(
+                                        text = item.description,
+                                        style = MaterialTheme.typography.caption,
+                                        color = MaterialTheme.colors.onSurface.copy(alpha = 0.5f),
+                                        modifier = Modifier.padding(top = 2.dp)
+                                    )
+                                }
+                                if (item.minutes > 0) {
+                                    Text(
+                                        text = "${item.minutes} min",
+                                        style = MaterialTheme.typography.caption,
+                                        color = MaterialTheme.colors.primary.copy(alpha = 0.7f),
+                                        modifier = Modifier.padding(top = 2.dp)
+                                    )
+                                }
+                            }
+                            IconButton(
+                                onClick = {
+                                    editingIndex = index
+                                    editingText = item.text
+                                    editingDesc = item.description
+                                    editingMins = if (item.minutes > 0) item.minutes.toString() else ""
+                                },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Edit,
+                                    contentDescription = "Edit",
+                                    tint = MaterialTheme.colors.onSurface.copy(alpha = 0.3f),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                        IconButton(
+                            onClick = {
+                                subtaskItems = subtaskItems.toMutableList().also { it.removeAt(index) }
+                                if (editingIndex == index) editingIndex = -1
+                                else if (editingIndex > index) editingIndex--
+                            },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Remove",
+                                tint = MaterialTheme.colors.onSurface.copy(alpha = 0.3f),
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -374,7 +586,7 @@ private fun RoutineForm(
                     keyboardActions = KeyboardActions(
                         onDone = {
                             if (newSubtask.isNotBlank()) {
-                                subtaskTexts = subtaskTexts + newSubtask.trim()
+                                subtaskItems = subtaskItems + RoutineSubtask(text = newSubtask.trim())
                                 newSubtask = ""
                             }
                         }
@@ -385,7 +597,7 @@ private fun RoutineForm(
                 IconButton(
                     onClick = {
                         if (newSubtask.isNotBlank()) {
-                            subtaskTexts = subtaskTexts + newSubtask.trim()
+                            subtaskItems = subtaskItems + RoutineSubtask(text = newSubtask.trim())
                             newSubtask = ""
                         }
                     },
@@ -469,7 +681,7 @@ private fun RoutineForm(
                         val routine = Routine(
                             id = initial?.id ?: System.nanoTime(),
                             name = name.trim(),
-                            subtasks = subtaskTexts.map { RoutineSubtask(text = it) },
+                            subtasks = subtaskItems,
                             focusMinutes = focusMin.toIntOrNull() ?: 25,
                             reviewMinutes = reviewMin.toIntOrNull() ?: 5,
                             breakMinutes = breakMin.toIntOrNull() ?: 15,
