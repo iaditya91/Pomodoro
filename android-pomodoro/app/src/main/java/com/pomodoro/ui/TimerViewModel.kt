@@ -77,7 +77,9 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         reviewMinutes = prefs.getInt("review_minutes", 5)
         breakMinutes = prefs.getInt("break_minutes", 15)
         val cur = _uiState.value ?: TimerUiState()
-        _uiState.postValue(cur.copy(remainingMillis = minutesToMillis(durationForMode(cur.mode))))
+        if (!cur.isRunning) {
+            _uiState.postValue(cur.copy(remainingMillis = minutesToMillis(durationForMode(cur.mode))))
+        }
     }
 
     fun toggleRunning() {
