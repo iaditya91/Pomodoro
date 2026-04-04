@@ -24,15 +24,15 @@ val SecondaryDark = Color(0xFF5EEAD4)
 
 // Backgrounds
 val BackgroundLight = Color(0xFFF8F6F4)
-val BackgroundDark = Color(0xFF1A1A2E)
+val BackgroundDark = Color(0xFF000000)
 
 // Surfaces
 val SurfaceLight = Color(0xFFFFFFFF)
-val SurfaceDark = Color(0xFF242442)
+val SurfaceDark = Color(0xFF121212)
 
 // On-colors
 val OnPrimaryLight = Color(0xFFFFFFFF)
-val OnPrimaryDark = Color(0xFF1A1A2E)
+val OnPrimaryDark = Color(0xFF000000)
 
 val OnBackgroundLight = Color(0xFF1C1B1F)
 val OnBackgroundDark = Color(0xFFE6E1E5)
@@ -55,7 +55,7 @@ val BreakColorDark = Color(0xFF5EEAD4)
 
 // Track colors (for circular progress background)
 val TrackLight = Color(0xFFE8E4E0)
-val TrackDark = Color(0xFF3A3A5C)
+val TrackDark = Color(0xFF262626)
 
 private val LightColorScheme = lightColors(
     primary = PrimaryLight,
@@ -81,7 +81,7 @@ private val DarkColorScheme = darkColors(
     surface = SurfaceDark,
     error = ErrorDark,
     onPrimary = OnPrimaryDark,
-    onSecondary = Color(0xFF1A1A2E),
+    onSecondary = Color(0xFF000000),
     onBackground = OnBackgroundDark,
     onSurface = OnSurfaceDark,
     onError = Color(0xFF601410)

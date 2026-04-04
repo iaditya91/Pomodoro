@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
+import com.pomodoro.BackupPayload
 import com.pomodoro.DriveBackupHelper
 import com.pomodoro.MiniTaskGenerator
 import com.pomodoro.NotificationHelper
@@ -41,6 +42,11 @@ data class SavedReviewNote(
     val timestamp: Long = System.currentTimeMillis()
 )
 
+data class TodoTask(
+    val id: Long = System.nanoTime(),
+    val text: String = ""
+)
+
 data class TimerUiState(
     val mode: TimerMode = TimerMode.FOCUS,
     val remainingMillis: Long = 0L,
@@ -55,6 +61,9 @@ data class TimerUiState(
 class TimerViewModel(application: Application) : AndroidViewModel(application) {
     private val _uiState = MutableLiveData(TimerUiState())
     val uiState: LiveData<TimerUiState> = _uiState
+
+    private val _todoTasks = MutableLiveData<List<TodoTask>>(emptyList())
+    val todoTasks: LiveData<List<TodoTask>> = _todoTasks
 
     private val _savedNotes = MutableLiveData<List<SavedReviewNote>>(emptyList())
     val savedNotes: LiveData<List<SavedReviewNote>> = _savedNotes
@@ -229,12 +238,13 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
 
     fun backupToDrive(ctx: Context) {
         val notes = _savedNotes.value ?: emptyList()
+        val todos = _todoTasks.value ?: emptyList()
         _backupStatus.postValue(BackupStatus.LOADING)
         viewModelScope.launch {
-            val result = DriveBackupHelper.backup(ctx, notes)
+            val result = DriveBackupHelper.backup(ctx, notes, todos)
             if (result.isSuccess) {
                 _backupStatus.postValue(BackupStatus.SUCCESS)
-                _backupMessage.postValue("Backed up ${notes.size} note(s)")
+                _backupMessage.postValue("Backed up ${notes.size} note(s), ${todos.size} task(s)")
             } else {
                 _backupStatus.postValue(BackupStatus.ERROR)
                 _backupMessage.postValue(result.exceptionOrNull()?.message ?: "Backup failed")
@@ -247,10 +257,11 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val result = DriveBackupHelper.restore(ctx)
             if (result.isSuccess) {
-                val notes = result.getOrDefault(emptyList())
-                _savedNotes.postValue(notes)
+                val payload = result.getOrNull() ?: return@launch
+                _savedNotes.postValue(payload.notes)
+                _todoTasks.postValue(payload.todoTasks)
                 _backupStatus.postValue(BackupStatus.SUCCESS)
-                _backupMessage.postValue("Restored ${notes.size} note(s)")
+                _backupMessage.postValue("Restored ${payload.notes.size} note(s), ${payload.todoTasks.size} task(s)")
             } else {
                 _backupStatus.postValue(BackupStatus.ERROR)
                 _backupMessage.postValue(result.exceptionOrNull()?.message ?: "Restore failed")
@@ -300,5 +311,32 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
             isRunning = true
         ))
         startTicker()
+    }
+
+    fun startFocusWithTask(ctx: Context, taskName: String) {
+        reloadDurations(ctx)
+        val cur = _uiState.value ?: TimerUiState()
+        if (cur.mode == TimerMode.REVIEW) saveCurrentReview()
+        val millis = minutesToMillis(focusMinutes)
+        _uiState.postValue(TimerUiState(
+            mode = TimerMode.FOCUS,
+            remainingMillis = millis,
+            isRunning = true,
+            taskName = taskName
+        ))
+        startTicker()
+    }
+
+    // --- Todo Tasks ---
+
+    fun addTodoTask(text: String) {
+        if (text.isBlank()) return
+        val existing = _todoTasks.value ?: emptyList()
+        _todoTasks.postValue(existing + TodoTask(text = text.trim()))
+    }
+
+    fun removeTodoTask(id: Long) {
+        val existing = _todoTasks.value ?: return
+        _todoTasks.postValue(existing.filter { it.id != id })
     }
 }

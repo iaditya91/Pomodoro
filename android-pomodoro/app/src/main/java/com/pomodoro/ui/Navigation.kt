@@ -14,6 +14,7 @@ import androidx.compose.material.Icon
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Scaffold
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Notes
 import androidx.compose.material.icons.filled.Settings
@@ -34,11 +35,12 @@ import androidx.navigation.compose.rememberNavController
 
 sealed class Tab(val route: String, val label: String, val icon: ImageVector) {
     object Home : Tab("home", "Home", Icons.Default.Home)
+    object Todo : Tab("todo", "Todo", Icons.Default.CheckCircle)
     object Notes : Tab("notes", "Notes", Icons.Default.Notes)
     object Settings : Tab("settings", "Settings", Icons.Default.Settings)
 }
 
-private val tabs = listOf(Tab.Home, Tab.Notes, Tab.Settings)
+private val tabs = listOf(Tab.Home, Tab.Todo, Tab.Notes, Tab.Settings)
 
 @Composable
 fun PomodoroNavHost(modifier: Modifier = Modifier) {
@@ -106,6 +108,20 @@ fun PomodoroNavHost(modifier: Modifier = Modifier) {
         ) {
             composable(Tab.Home.route) {
                 MainScreen(viewModel = viewModel)
+            }
+            composable(Tab.Todo.route) {
+                TodoScreen(
+                    viewModel = viewModel,
+                    onStartTask = {
+                        navController.navigate(Tab.Home.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                )
             }
             composable(Tab.Notes.route) {
                 NotesScreen(viewModel = viewModel)

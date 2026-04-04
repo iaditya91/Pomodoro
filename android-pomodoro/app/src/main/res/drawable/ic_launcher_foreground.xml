@@ -1,0 +1,57 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Tomato body -->
+    <path
+        android:fillColor="#E85D4A"
+        android:pathData="M54,30 C36,30 22,44 22,62 C22,80 36,90 54,90 C72,90 86,80 86,62 C86,44 72,30 54,30Z" />
+
+    <!-- Tomato highlight (left shine) -->
+    <path
+        android:fillColor="#F07060"
+        android:pathData="M38,42 C32,48 30,56 32,64 C30,54 34,46 38,42Z" />
+
+    <!-- Stem -->
+    <path
+        android:fillColor="#4CAF50"
+        android:pathData="M52,30 L52,22 C52,20 54,18 56,20 L56,30Z" />
+
+    <!-- Left leaf -->
+    <path
+        android:fillColor="#66BB6A"
+        android:pathData="M54,26 C48,20 40,20 38,24 C42,22 48,24 54,26Z" />
+
+    <!-- Right leaf -->
+    <path
+        android:fillColor="#66BB6A"
+        android:pathData="M54,26 C60,20 68,20 70,24 C66,22 60,24 54,26Z" />
+
+    <!-- Clock face circle -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.25"
+        android:pathData="M54,45 m-15,0 a15,15 0,1 1,30 0 a15,15 0,1 1,-30 0" />
+
+    <!-- Clock hour hand (pointing to 12) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:strokeWidth="2.5"
+        android:strokeColor="#FFFFFF"
+        android:pathData="M54,60 L54,49" />
+
+    <!-- Clock minute hand (pointing to ~2 o'clock, 25min) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:strokeWidth="2"
+        android:strokeColor="#FFFFFF"
+        android:pathData="M54,60 L63,53" />
+
+    <!-- Clock center dot -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,60 m-2,0 a2,2 0,1 1,4 0 a2,2 0,1 1,-4 0" />
+
+</vector>
