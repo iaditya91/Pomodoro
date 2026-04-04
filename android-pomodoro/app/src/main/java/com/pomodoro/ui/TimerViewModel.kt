@@ -6,6 +6,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
+import com.pomodoro.DriveBackupHelper
+import com.pomodoro.MiniTaskGenerator
 import com.pomodoro.NotificationHelper
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -35,7 +37,7 @@ enum class ReviewQuestion { WENT_WELL, DIDNT_GO_WELL, IMPROVEMENTS }
 data class SavedReviewNote(
     val id: Long = System.nanoTime(),
     val taskName: String = "",
-    val answers: ReviewAnswers = ReviewAnswers(),
+    val improvements: List<ReviewItem> = emptyList(),
     val timestamp: Long = System.currentTimeMillis()
 )
 
@@ -45,7 +47,9 @@ data class TimerUiState(
     val isRunning: Boolean = false,
     val taskName: String = "",
     val subtasks: List<Subtask> = emptyList(),
-    val reviewAnswers: ReviewAnswers = ReviewAnswers()
+    val reviewAnswers: ReviewAnswers = ReviewAnswers(),
+    val isGenerating: Boolean = false,
+    val generateError: String? = null
 )
 
 class TimerViewModel(application: Application) : AndroidViewModel(application) {
@@ -142,6 +146,34 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.postValue(cur.copy(subtasks = cur.subtasks.filter { it.id != id }))
     }
 
+    fun generateMiniTasks(taskText: String) {
+        if (taskText.isBlank()) return
+        val cur = _uiState.value ?: return
+        _uiState.postValue(cur.copy(isGenerating = true))
+        viewModelScope.launch {
+            val result = MiniTaskGenerator.generate(taskText)
+            val latest = _uiState.value ?: return@launch
+            if (result.isSuccess) {
+                val newSubtasks = result.getOrDefault(emptyList()).map { Subtask(text = it) }
+                _uiState.postValue(latest.copy(
+                    subtasks = latest.subtasks + newSubtasks,
+                    isGenerating = false,
+                    generateError = null
+                ))
+            } else {
+                _uiState.postValue(latest.copy(
+                    isGenerating = false,
+                    generateError = result.exceptionOrNull()?.message ?: "Failed to generate tasks"
+                ))
+            }
+        }
+    }
+
+    fun clearGenerateError() {
+        val cur = _uiState.value ?: return
+        _uiState.postValue(cur.copy(generateError = null))
+    }
+
     fun addReviewItem(question: ReviewQuestion, text: String) {
         if (text.isBlank()) return
         val cur = _uiState.value ?: return
@@ -169,13 +201,10 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
     private fun saveCurrentReview() {
         val cur = _uiState.value ?: return
         val answers = cur.reviewAnswers
-        val hasContent = answers.wentWell.isNotEmpty() ||
-                answers.didntGoWell.isNotEmpty() ||
-                answers.improvements.isNotEmpty()
-        if (!hasContent) return
+        if (answers.improvements.isEmpty()) return
         val note = SavedReviewNote(
             taskName = cur.taskName,
-            answers = answers
+            improvements = answers.improvements
         )
         val existing = _savedNotes.value ?: emptyList()
         _savedNotes.postValue(listOf(note) + existing)
@@ -184,6 +213,52 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteNote(id: Long) {
         val existing = _savedNotes.value ?: return
         _savedNotes.postValue(existing.filter { it.id != id })
+    }
+
+    // --- Backup / Restore ---
+
+    enum class BackupStatus { IDLE, LOADING, SUCCESS, ERROR }
+
+    private val _backupStatus = MutableLiveData(BackupStatus.IDLE)
+    val backupStatus: LiveData<BackupStatus> = _backupStatus
+
+    private val _backupMessage = MutableLiveData("")
+    val backupMessage: LiveData<String> = _backupMessage
+
+    fun backupToDrive(ctx: Context) {
+        val notes = _savedNotes.value ?: emptyList()
+        _backupStatus.postValue(BackupStatus.LOADING)
+        viewModelScope.launch {
+            val result = DriveBackupHelper.backup(ctx, notes)
+            if (result.isSuccess) {
+                _backupStatus.postValue(BackupStatus.SUCCESS)
+                _backupMessage.postValue("Backed up ${notes.size} note(s)")
+            } else {
+                _backupStatus.postValue(BackupStatus.ERROR)
+                _backupMessage.postValue(result.exceptionOrNull()?.message ?: "Backup failed")
+            }
+        }
+    }
+
+    fun restoreFromDrive(ctx: Context) {
+        _backupStatus.postValue(BackupStatus.LOADING)
+        viewModelScope.launch {
+            val result = DriveBackupHelper.restore(ctx)
+            if (result.isSuccess) {
+                val notes = result.getOrDefault(emptyList())
+                _savedNotes.postValue(notes)
+                _backupStatus.postValue(BackupStatus.SUCCESS)
+                _backupMessage.postValue("Restored ${notes.size} note(s)")
+            } else {
+                _backupStatus.postValue(BackupStatus.ERROR)
+                _backupMessage.postValue(result.exceptionOrNull()?.message ?: "Restore failed")
+            }
+        }
+    }
+
+    fun clearBackupStatus() {
+        _backupStatus.postValue(BackupStatus.IDLE)
+        _backupMessage.postValue("")
     }
 
     fun startReview(ctx: Context) {

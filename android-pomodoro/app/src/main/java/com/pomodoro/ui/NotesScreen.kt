@@ -1,7 +1,6 @@
 package com.pomodoro.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -47,7 +45,7 @@ fun NotesScreen(viewModel: TimerViewModel) {
         Spacer(modifier = Modifier.height(24.dp))
 
         Text(
-            text = "Review Notes",
+            text = "Improvements",
             style = MaterialTheme.typography.h5,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colors.onBackground,
@@ -95,13 +93,13 @@ private fun EmptyNotesPlaceholder() {
         )
         Spacer(modifier = Modifier.height(16.dp))
         Text(
-            text = "No review notes yet",
+            text = "No improvements yet",
             style = MaterialTheme.typography.h6,
             color = MaterialTheme.colors.onBackground.copy(alpha = 0.6f)
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "Complete a review session to see your notes here",
+            text = "Add improvements during review to see them here",
             style = MaterialTheme.typography.body2,
             color = MaterialTheme.colors.onBackground.copy(alpha = 0.4f)
         )
@@ -155,72 +153,26 @@ private fun NoteCard(note: SavedReviewNote, onDelete: () -> Unit) {
                 }
             }
 
-            val answers = note.answers
-
-            if (answers.wentWell.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(12.dp))
-                NoteQuestionSection(
-                    emoji = "\u2705",
-                    title = "What went well",
-                    items = answers.wentWell
-                )
-            }
-
-            if (answers.didntGoWell.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(12.dp))
-                NoteQuestionSection(
-                    emoji = "\u26A0\uFE0F",
-                    title = "What didn't go well",
-                    items = answers.didntGoWell
-                )
-            }
-
-            if (answers.improvements.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(12.dp))
-                NoteQuestionSection(
-                    emoji = "\uD83D\uDCA1",
-                    title = "Improvements",
-                    items = answers.improvements
-                )
+            Spacer(modifier = Modifier.height(12.dp))
+            note.improvements.forEach { item ->
+                Row(
+                    modifier = Modifier.padding(start = 8.dp, top = 3.dp, bottom = 3.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Text(
+                        text = "\u2022",
+                        color = MaterialTheme.colors.primary,
+                        fontSize = 14.sp,
+                        modifier = Modifier.padding(end = 8.dp, top = 1.dp)
+                    )
+                    Text(
+                        text = item.text,
+                        style = MaterialTheme.typography.body2,
+                        color = MaterialTheme.colors.onSurface.copy(alpha = 0.85f)
+                    )
+                }
             }
         }
     }
 }
 
-@Composable
-private fun NoteQuestionSection(
-    emoji: String,
-    title: String,
-    items: List<ReviewItem>
-) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(text = emoji, fontSize = 14.sp)
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(
-            text = title,
-            style = MaterialTheme.typography.caption,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
-            letterSpacing = 1.sp
-        )
-    }
-    Spacer(modifier = Modifier.height(4.dp))
-    items.forEach { item ->
-        Row(
-            modifier = Modifier.padding(start = 8.dp, top = 3.dp, bottom = 3.dp),
-            verticalAlignment = Alignment.Top
-        ) {
-            Text(
-                text = "\u2022",
-                color = MaterialTheme.colors.primary,
-                fontSize = 14.sp,
-                modifier = Modifier.padding(end = 8.dp, top = 1.dp)
-            )
-            Text(
-                text = item.text,
-                style = MaterialTheme.typography.body2,
-                color = MaterialTheme.colors.onSurface.copy(alpha = 0.85f)
-            )
-        }
-    }
-}

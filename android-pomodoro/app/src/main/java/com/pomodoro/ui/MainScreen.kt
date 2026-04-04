@@ -37,17 +37,21 @@ import androidx.compose.material.OutlinedTextField
 import androidx.compose.material.Text
 import androidx.compose.material.TextFieldDefaults
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.CircularProgressIndicator
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import android.widget.Toast
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,6 +61,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
@@ -75,6 +80,14 @@ fun MainScreen(viewModel: TimerViewModel = viewModel()) {
     }
 
     val state = uiState ?: return
+
+    // Show toast on generate error
+    LaunchedEffect(state.generateError) {
+        state.generateError?.let {
+            Toast.makeText(ctx, it, Toast.LENGTH_SHORT).show()
+            viewModel.clearGenerateError()
+        }
+    }
 
     // Mode-specific accent color
     val accentColor by animateColorAsState(
@@ -159,10 +172,12 @@ fun MainScreen(viewModel: TimerViewModel = viewModel()) {
                 taskName = state.taskName,
                 subtasks = state.subtasks,
                 accentColor = accentColor,
+                isGenerating = state.isGenerating,
                 onTaskNameChange = { viewModel.updateTaskName(it) },
                 onAddSubtask = { viewModel.addSubtask(it) },
                 onToggleSubtask = { viewModel.toggleSubtask(it) },
-                onRemoveSubtask = { viewModel.removeSubtask(it) }
+                onRemoveSubtask = { viewModel.removeSubtask(it) },
+                onGenerateMiniTasks = { viewModel.generateMiniTasks(it) }
             )
         }
 
@@ -246,36 +261,77 @@ private fun TaskSection(
     taskName: String,
     subtasks: List<Subtask>,
     accentColor: Color,
+    isGenerating: Boolean,
     onTaskNameChange: (String) -> Unit,
     onAddSubtask: (String) -> Unit,
     onToggleSubtask: (Long) -> Unit,
-    onRemoveSubtask: (Long) -> Unit
+    onRemoveSubtask: (Long) -> Unit,
+    onGenerateMiniTasks: (String) -> Unit
 ) {
     var newSubtaskText by remember { mutableStateOf("") }
 
     Column(modifier = Modifier.fillMaxWidth()) {
-        // Task name input
-        OutlinedTextField(
-            value = taskName,
-            onValueChange = onTaskNameChange,
-            placeholder = {
-                Text(
-                    "What are you working on?",
-                    color = MaterialTheme.colors.onSurface.copy(alpha = 0.35f)
-                )
-            },
-            singleLine = true,
-            shape = RoundedCornerShape(14.dp),
-            colors = TextFieldDefaults.outlinedTextFieldColors(
-                focusedBorderColor = accentColor,
-                unfocusedBorderColor = MaterialTheme.colors.onSurface.copy(alpha = 0.15f),
-                textColor = MaterialTheme.colors.onSurface,
-                cursorColor = accentColor,
-                backgroundColor = MaterialTheme.colors.surface
-            ),
-            textStyle = MaterialTheme.typography.body1.copy(fontWeight = FontWeight.Medium),
-            modifier = Modifier.fillMaxWidth()
-        )
+        // Task name input + AI button
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value = taskName,
+                onValueChange = onTaskNameChange,
+                placeholder = {
+                    Text(
+                        "What are you working on?",
+                        color = MaterialTheme.colors.onSurface.copy(alpha = 0.35f)
+                    )
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(14.dp),
+                colors = TextFieldDefaults.outlinedTextFieldColors(
+                    focusedBorderColor = accentColor,
+                    unfocusedBorderColor = MaterialTheme.colors.onSurface.copy(alpha = 0.15f),
+                    textColor = MaterialTheme.colors.onSurface,
+                    cursorColor = accentColor,
+                    backgroundColor = MaterialTheme.colors.surface
+                ),
+                textStyle = MaterialTheme.typography.body1.copy(fontWeight = FontWeight.Medium),
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                modifier = Modifier.weight(1f)
+            )
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            // AI generate button for main task
+            IconButton(
+                onClick = { if (taskName.isNotBlank()) onGenerateMiniTasks(taskName) },
+                enabled = taskName.isNotBlank() && !isGenerating,
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (taskName.isNotBlank() && !isGenerating)
+                            accentColor.copy(alpha = 0.15f)
+                        else
+                            MaterialTheme.colors.onSurface.copy(alpha = 0.05f)
+                    )
+            ) {
+                if (isGenerating) {
+                    CircularProgressIndicator(
+                        color = accentColor,
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(18.dp)
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = "Generate mini-tasks",
+                        tint = if (taskName.isNotBlank()) accentColor
+                        else MaterialTheme.colors.onSurface.copy(alpha = 0.2f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+        }
 
         Spacer(modifier = Modifier.height(12.dp))
 
@@ -284,8 +340,10 @@ private fun TaskSection(
             SubtaskRow(
                 subtask = subtask,
                 accentColor = accentColor,
+                isGenerating = isGenerating,
                 onToggle = { onToggleSubtask(subtask.id) },
-                onRemove = { onRemoveSubtask(subtask.id) }
+                onRemove = { onRemoveSubtask(subtask.id) },
+                onGenerate = { onGenerateMiniTasks(subtask.text) }
             )
         }
 
@@ -314,7 +372,10 @@ private fun TaskSection(
                     backgroundColor = MaterialTheme.colors.surface
                 ),
                 textStyle = MaterialTheme.typography.body2,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Sentences,
+                    imeAction = ImeAction.Done
+                ),
                 keyboardActions = KeyboardActions(
                     onDone = {
                         if (newSubtaskText.isNotBlank()) {
@@ -355,8 +416,10 @@ private fun TaskSection(
 private fun SubtaskRow(
     subtask: Subtask,
     accentColor: Color,
+    isGenerating: Boolean,
     onToggle: () -> Unit,
-    onRemove: () -> Unit
+    onRemove: () -> Unit,
+    onGenerate: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -387,15 +450,39 @@ private fun SubtaskRow(
             modifier = Modifier.weight(1f)
         )
 
+        // AI generate for this subtask
+        if (!subtask.isDone) {
+            IconButton(
+                onClick = onGenerate,
+                enabled = !isGenerating,
+                modifier = Modifier.size(28.dp)
+            ) {
+                if (isGenerating) {
+                    CircularProgressIndicator(
+                        color = accentColor.copy(alpha = 0.5f),
+                        strokeWidth = 1.5.dp,
+                        modifier = Modifier.size(14.dp)
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = "Break down this subtask",
+                        tint = accentColor.copy(alpha = 0.5f),
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+            }
+        }
+
         IconButton(
             onClick = onRemove,
-            modifier = Modifier.size(32.dp)
+            modifier = Modifier.size(28.dp)
         ) {
             Icon(
                 imageVector = Icons.Default.Close,
                 contentDescription = "Remove subtask",
                 tint = MaterialTheme.colors.onSurface.copy(alpha = 0.3f),
-                modifier = Modifier.size(16.dp)
+                modifier = Modifier.size(14.dp)
             )
         }
     }
@@ -530,7 +617,10 @@ private fun ReviewQuestionCard(
                         cursorColor = accentColor
                     ),
                     textStyle = MaterialTheme.typography.body2,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Sentences,
+                        imeAction = ImeAction.Done
+                    ),
                     keyboardActions = KeyboardActions(
                         onDone = {
                             if (inputText.isNotBlank()) {
