@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -E \"\\\\.\\(kt|xml\\)$\")",
+      "Bash(grep -E \"\\\\.\\(gradle|xml|properties|json\\)$\")",
+      "Bash(gradle --version)"
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+<resources>
+    <style name="Theme.Pomodoro" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#FF7B6B</item>
+        <item name="colorPrimaryVariant">#FF9E91</item>
+        <item name="colorOnPrimary">#1A1A2E</item>
+        <item name="colorSecondary">#5EEAD4</item>
+        <item name="colorSecondaryVariant">#7DFFD4</item>
+        <item name="colorOnSecondary">#1A1A2E</item>
+        <item name="android:colorBackground">#1A1A2E</item>
+        <item name="colorSurface">#242442</item>
+        <item name="colorOnSurface">#E6E1E5</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>
