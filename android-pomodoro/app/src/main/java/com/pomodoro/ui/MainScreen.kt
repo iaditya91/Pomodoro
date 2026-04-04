@@ -257,10 +257,14 @@ fun MainScreen(viewModel: TimerViewModel = viewModel()) {
 
                 IconButton(
                     onClick = {
-                        when (state.mode) {
-                            TimerMode.FOCUS -> viewModel.startReview(ctx)
-                            TimerMode.REVIEW -> viewModel.startBreak(ctx)
-                            TimerMode.BREAK -> viewModel.startFocus(ctx)
+                        if (viewModel.isRoutineActive()) {
+                            viewModel.advanceRoutine(ctx)
+                        } else {
+                            when (state.mode) {
+                                TimerMode.FOCUS -> viewModel.startReview(ctx)
+                                TimerMode.REVIEW -> viewModel.startBreak(ctx)
+                                TimerMode.BREAK -> viewModel.startFocus(ctx)
+                            }
                         }
                     },
                     modifier = Modifier
@@ -284,6 +288,17 @@ fun MainScreen(viewModel: TimerViewModel = viewModel()) {
                 style = MaterialTheme.typography.caption,
                 color = MaterialTheme.colors.onBackground.copy(alpha = 0.5f)
             )
+
+            // Show routine cycle info
+            viewModel.getRoutineCycleInfo()?.let { (current, total) ->
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Cycle $current of $total",
+                    style = MaterialTheme.typography.caption,
+                    color = accentColor.copy(alpha = 0.7f),
+                    fontWeight = FontWeight.Medium
+                )
+            }
         }
     }
 }

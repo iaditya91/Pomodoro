@@ -46,9 +46,30 @@ data class SavedReviewNote(
     val timestamp: Long = System.currentTimeMillis()
 )
 
+enum class TodoSection { TODAY, PLANNED }
+
 data class TodoTask(
     val id: Long = System.nanoTime(),
+    val text: String = "",
+    val section: TodoSection = TodoSection.PLANNED
+)
+
+data class RoutineSubtask(
+    val id: Long = System.nanoTime(),
     val text: String = ""
+)
+
+data class Routine(
+    val id: Long = System.nanoTime(),
+    val name: String = "",
+    val subtasks: List<RoutineSubtask> = emptyList(),
+    val focusMinutes: Int = 25,
+    val reviewMinutes: Int = 5,
+    val breakMinutes: Int = 15,
+    val focusCycles: Int = 4,
+    val reviewEnabled: Boolean = true,
+    val breakEnabled: Boolean = true,
+    val useDefaultSettings: Boolean = true
 )
 
 enum class CheckItemMode { CHECK, TYPE }
@@ -89,6 +110,13 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
     private val _savedNotes = MutableLiveData<List<SavedReviewNote>>(emptyList())
     val savedNotes: LiveData<List<SavedReviewNote>> = _savedNotes
 
+    private val _routines = MutableLiveData<List<Routine>>(emptyList())
+    val routines: LiveData<List<Routine>> = _routines
+
+    // Active routine tracking
+    private var activeRoutine: Routine? = null
+    private var currentCycle = 0
+
     private var tickJob: Job? = null
 
     // defaults (minutes)
@@ -105,6 +133,7 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         loadPersistedData()
         _savedNotes.observeForever { persistNotes(it) }
         _todoTasks.observeForever { persistTodos(it) }
+        _routines.observeForever { persistRoutines(it) }
     }
 
     private fun loadPersistedData() {
@@ -120,6 +149,12 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
                 _todoTasks.value = gson.fromJson(json, type)
             } catch (_: Exception) {}
         }
+        prefs.getString("routines", null)?.let { json ->
+            try {
+                val type = object : TypeToken<List<Routine>>() {}.type
+                _routines.value = gson.fromJson(json, type)
+            } catch (_: Exception) {}
+        }
     }
 
     private fun persistNotes(notes: List<SavedReviewNote>) {
@@ -128,6 +163,10 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun persistTodos(todos: List<TodoTask>) {
         prefs.edit().putString("todo_tasks", gson.toJson(todos)).apply()
+    }
+
+    private fun persistRoutines(routines: List<Routine>) {
+        prefs.edit().putString("routines", gson.toJson(routines)).apply()
     }
 
     fun reloadDurations(ctx: Context) {
@@ -459,5 +498,154 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
     fun removeTodoTask(id: Long) {
         val existing = _todoTasks.value ?: return
         _todoTasks.postValue(existing.filter { it.id != id })
+    }
+
+    fun moveTodoToToday(id: Long) {
+        val existing = _todoTasks.value ?: return
+        _todoTasks.postValue(existing.map {
+            if (it.id == id) it.copy(section = TodoSection.TODAY) else it
+        })
+    }
+
+    fun moveTodoToPlanned(id: Long) {
+        val existing = _todoTasks.value ?: return
+        _todoTasks.postValue(existing.map {
+            if (it.id == id) it.copy(section = TodoSection.PLANNED) else it
+        })
+    }
+
+    // --- Routines ---
+
+    fun addRoutine(routine: Routine) {
+        val existing = _routines.value ?: emptyList()
+        _routines.postValue(existing + routine)
+    }
+
+    fun updateRoutine(routine: Routine) {
+        val existing = _routines.value ?: return
+        _routines.postValue(existing.map { if (it.id == routine.id) routine else it })
+    }
+
+    fun deleteRoutine(id: Long) {
+        val existing = _routines.value ?: return
+        _routines.postValue(existing.filter { it.id != id })
+    }
+
+    fun startRoutine(ctx: Context, routine: Routine) {
+        val cur = _uiState.value ?: TimerUiState()
+        if (cur.mode == TimerMode.REVIEW) saveCurrentReview()
+
+        activeRoutine = routine
+        currentCycle = 1
+
+        if (routine.useDefaultSettings) {
+            reloadDurations(ctx)
+        } else {
+            focusMinutes = routine.focusMinutes
+            reviewMinutes = routine.reviewMinutes
+            breakMinutes = routine.breakMinutes
+        }
+
+        val millis = minutesToMillis(focusMinutes)
+        val checklist = buildChecklist(ctx)
+        val hasChecklist = checklist.isNotEmpty()
+        val subtasks = routine.subtasks.map { Subtask(text = it.text) }
+        _uiState.postValue(TimerUiState(
+            mode = TimerMode.FOCUS,
+            remainingMillis = millis,
+            isRunning = !hasChecklist,
+            taskName = routine.name,
+            subtasks = subtasks,
+            focusChecklist = checklist,
+            checklistCompleted = !hasChecklist
+        ))
+        if (!hasChecklist) startTicker()
+    }
+
+    fun advanceRoutine(ctx: Context) {
+        val routine = activeRoutine ?: return
+        val cur = _uiState.value ?: return
+
+        when (cur.mode) {
+            TimerMode.FOCUS -> {
+                if (routine.reviewEnabled) {
+                    if (!routine.useDefaultSettings) reviewMinutes = routine.reviewMinutes
+                    val millis = minutesToMillis(reviewMinutes)
+                    _uiState.postValue(cur.copy(
+                        mode = TimerMode.REVIEW,
+                        remainingMillis = millis,
+                        isRunning = true,
+                        reviewAnswers = ReviewAnswers()
+                    ))
+                    startTicker()
+                } else if (routine.breakEnabled) {
+                    if (!routine.useDefaultSettings) breakMinutes = routine.breakMinutes
+                    if (cur.mode == TimerMode.REVIEW) saveCurrentReview()
+                    val millis = minutesToMillis(breakMinutes)
+                    _uiState.postValue(cur.copy(
+                        mode = TimerMode.BREAK,
+                        remainingMillis = millis,
+                        isRunning = true
+                    ))
+                    startTicker()
+                } else {
+                    startNextCycleOrFinish(ctx)
+                }
+            }
+            TimerMode.REVIEW -> {
+                saveCurrentReview()
+                if (routine.breakEnabled) {
+                    if (!routine.useDefaultSettings) breakMinutes = routine.breakMinutes
+                    val millis = minutesToMillis(breakMinutes)
+                    _uiState.postValue(cur.copy(
+                        mode = TimerMode.BREAK,
+                        remainingMillis = millis,
+                        isRunning = true
+                    ))
+                    startTicker()
+                } else {
+                    startNextCycleOrFinish(ctx)
+                }
+            }
+            TimerMode.BREAK -> {
+                startNextCycleOrFinish(ctx)
+            }
+        }
+    }
+
+    private fun startNextCycleOrFinish(ctx: Context) {
+        val routine = activeRoutine ?: return
+        if (currentCycle < routine.focusCycles) {
+            currentCycle++
+            if (!routine.useDefaultSettings) focusMinutes = routine.focusMinutes
+            val millis = minutesToMillis(focusMinutes)
+            val checklist = buildChecklist(ctx)
+            val hasChecklist = checklist.isNotEmpty()
+            _uiState.postValue(TimerUiState(
+                mode = TimerMode.FOCUS,
+                remainingMillis = millis,
+                isRunning = !hasChecklist,
+                taskName = routine.name,
+                subtasks = routine.subtasks.map { Subtask(text = it.text) },
+                focusChecklist = checklist,
+                checklistCompleted = !hasChecklist
+            ))
+            if (!hasChecklist) startTicker()
+        } else {
+            activeRoutine = null
+            currentCycle = 0
+            reloadDurations(ctx)
+            _uiState.postValue(TimerUiState(
+                mode = TimerMode.FOCUS,
+                remainingMillis = minutesToMillis(focusMinutes)
+            ))
+        }
+    }
+
+    fun isRoutineActive(): Boolean = activeRoutine != null
+
+    fun getRoutineCycleInfo(): Pair<Int, Int>? {
+        val routine = activeRoutine ?: return null
+        return currentCycle to routine.focusCycles
     }
 }

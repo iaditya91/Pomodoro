@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Notes
+import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -36,11 +37,12 @@ import androidx.navigation.compose.rememberNavController
 sealed class Tab(val route: String, val label: String, val icon: ImageVector) {
     object Home : Tab("home", "Home", Icons.Default.Home)
     object Todo : Tab("todo", "Todo", Icons.Default.CheckCircle)
+    object Routines : Tab("routines", "Routines", Icons.Default.Repeat)
     object Notes : Tab("notes", "Notes", Icons.Default.Notes)
     object Settings : Tab("settings", "Settings", Icons.Default.Settings)
 }
 
-private val tabs = listOf(Tab.Home, Tab.Todo, Tab.Notes, Tab.Settings)
+private val tabs = listOf(Tab.Home, Tab.Todo, Tab.Routines, Tab.Notes, Tab.Settings)
 
 @Composable
 fun PomodoroNavHost(modifier: Modifier = Modifier) {
@@ -113,6 +115,20 @@ fun PomodoroNavHost(modifier: Modifier = Modifier) {
                 TodoScreen(
                     viewModel = viewModel,
                     onStartTask = {
+                        navController.navigate(Tab.Home.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                )
+            }
+            composable(Tab.Routines.route) {
+                RoutinesScreen(
+                    viewModel = viewModel,
+                    onStartRoutine = {
                         navController.navigate(Tab.Home.route) {
                             popUpTo(navController.graph.findStartDestination().id) {
                                 saveState = true

@@ -1,6 +1,10 @@
 package com.pomodoro.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -25,12 +29,15 @@ import androidx.compose.material.TextFieldDefaults
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,6 +56,12 @@ fun TodoScreen(
     val tasks by viewModel.todoTasks.observeAsState(emptyList())
     val ctx = LocalContext.current
     var inputText by remember { mutableStateOf("") }
+
+    val todayTasks = tasks.filter { it.section == TodoSection.TODAY }
+    val plannedTasks = tasks.filter { it.section == TodoSection.PLANNED }
+
+    var todayExpanded by rememberSaveable { mutableStateOf(true) }
+    var plannedExpanded by rememberSaveable { mutableStateOf(true) }
 
     Column(
         modifier = Modifier
@@ -146,20 +159,128 @@ fun TodoScreen(
         if (tasks.isEmpty()) {
             EmptyTodoPlaceholder()
         } else {
-            tasks.forEach { task ->
-                TodoTaskCard(
-                    task = task,
-                    onPlay = {
-                        viewModel.startFocusWithTask(ctx, task.text)
-                        onStartTask()
-                    },
-                    onDelete = { viewModel.removeTodoTask(task.id) }
-                )
-                Spacer(modifier = Modifier.height(12.dp))
+            // Today section
+            SectionHeader(
+                title = "Today",
+                count = todayTasks.size,
+                expanded = todayExpanded,
+                onToggle = { todayExpanded = !todayExpanded }
+            )
+
+            AnimatedVisibility(
+                visible = todayExpanded,
+                enter = expandVertically(),
+                exit = shrinkVertically()
+            ) {
+                Column {
+                    if (todayTasks.isEmpty()) {
+                        Text(
+                            text = "No tasks for today",
+                            style = MaterialTheme.typography.body2,
+                            color = MaterialTheme.colors.onBackground.copy(alpha = 0.4f),
+                            modifier = Modifier.padding(start = 8.dp, top = 8.dp, bottom = 8.dp)
+                        )
+                    } else {
+                        todayTasks.forEach { task ->
+                            Spacer(modifier = Modifier.height(8.dp))
+                            TodoTaskCard(
+                                task = task,
+                                onPlay = {
+                                    viewModel.startFocusWithTask(ctx, task.text)
+                                    onStartTask()
+                                },
+                                onDelete = { viewModel.removeTodoTask(task.id) },
+                                onMove = { viewModel.moveTodoToPlanned(task.id) },
+                                moveLabel = "Move to Planned"
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // Planned section
+            SectionHeader(
+                title = "Planned",
+                count = plannedTasks.size,
+                expanded = plannedExpanded,
+                onToggle = { plannedExpanded = !plannedExpanded }
+            )
+
+            AnimatedVisibility(
+                visible = plannedExpanded,
+                enter = expandVertically(),
+                exit = shrinkVertically()
+            ) {
+                Column {
+                    if (plannedTasks.isEmpty()) {
+                        Text(
+                            text = "No planned tasks",
+                            style = MaterialTheme.typography.body2,
+                            color = MaterialTheme.colors.onBackground.copy(alpha = 0.4f),
+                            modifier = Modifier.padding(start = 8.dp, top = 8.dp, bottom = 8.dp)
+                        )
+                    } else {
+                        plannedTasks.forEach { task ->
+                            Spacer(modifier = Modifier.height(8.dp))
+                            TodoTaskCard(
+                                task = task,
+                                onPlay = {
+                                    viewModel.startFocusWithTask(ctx, task.text)
+                                    onStartTask()
+                                },
+                                onDelete = { viewModel.removeTodoTask(task.id) },
+                                onMove = { viewModel.moveTodoToToday(task.id) },
+                                moveLabel = "Move to Today"
+                            )
+                        }
+                    }
+                }
             }
         }
 
         Spacer(modifier = Modifier.height(80.dp))
+    }
+}
+
+@Composable
+private fun SectionHeader(
+    title: String,
+    count: Int,
+    expanded: Boolean,
+    onToggle: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onToggle() }
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.subtitle1,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colors.onBackground
+        )
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        Text(
+            text = "$count",
+            style = MaterialTheme.typography.body2,
+            color = MaterialTheme.colors.onBackground.copy(alpha = 0.5f)
+        )
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        Icon(
+            imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+            contentDescription = if (expanded) "Collapse" else "Expand",
+            tint = MaterialTheme.colors.onBackground.copy(alpha = 0.5f),
+            modifier = Modifier.size(24.dp)
+        )
     }
 }
 
@@ -194,7 +315,9 @@ private fun EmptyTodoPlaceholder() {
 private fun TodoTaskCard(
     task: TodoTask,
     onPlay: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onMove: () -> Unit,
+    moveLabel: String
 ) {
     Card(
         backgroundColor = MaterialTheme.colors.surface,
@@ -202,42 +325,55 @@ private fun TodoTaskCard(
         elevation = 1.dp,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Column {
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = task.text,
+                    style = MaterialTheme.typography.body1,
+                    color = MaterialTheme.colors.onSurface,
+                    modifier = Modifier.weight(1f)
+                )
+
+                IconButton(
+                    onClick = onPlay,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = "Start focus session",
+                        tint = MaterialTheme.colors.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(4.dp))
+
+                IconButton(
+                    onClick = onDelete,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Delete task",
+                        tint = MaterialTheme.colors.onSurface.copy(alpha = 0.35f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            // Move option
             Text(
-                text = task.text,
-                style = MaterialTheme.typography.body1,
-                color = MaterialTheme.colors.onSurface,
-                modifier = Modifier.weight(1f)
+                text = moveLabel,
+                style = MaterialTheme.typography.caption,
+                color = MaterialTheme.colors.primary,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .clickable { onMove() }
+                    .padding(start = 16.dp, end = 16.dp, bottom = 10.dp)
             )
-
-            IconButton(
-                onClick = onPlay,
-                modifier = Modifier.size(36.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.PlayArrow,
-                    contentDescription = "Start focus session",
-                    tint = MaterialTheme.colors.primary,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.width(4.dp))
-
-            IconButton(
-                onClick = onDelete,
-                modifier = Modifier.size(36.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Delete task",
-                    tint = MaterialTheme.colors.onSurface.copy(alpha = 0.35f),
-                    modifier = Modifier.size(20.dp)
-                )
-            }
         }
     }
 }
