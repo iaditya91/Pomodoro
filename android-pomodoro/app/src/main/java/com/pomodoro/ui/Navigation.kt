@@ -1,14 +1,18 @@
 package com.pomodoro.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.BottomNavigation
 import androidx.compose.material.BottomNavigationItem
+import androidx.compose.material.Divider
 import androidx.compose.material.Icon
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Scaffold
-import androidx.compose.material.Text
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Notes
@@ -16,9 +20,9 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -48,41 +52,49 @@ fun PomodoroNavHost(modifier: Modifier = Modifier) {
             val navBackStackEntry by navController.currentBackStackEntryAsState()
             val currentDestination = navBackStackEntry?.destination
 
-            BottomNavigation(
-                modifier = Modifier.navigationBarsPadding(),
-                backgroundColor = MaterialTheme.colors.surface,
-                contentColor = MaterialTheme.colors.onSurface,
-                elevation = 8.dp
+            Column(
+                modifier = Modifier
+                    .background(MaterialTheme.colors.surface)
+                    .navigationBarsPadding()
             ) {
-                tabs.forEach { tab ->
-                    val selected = currentDestination?.hierarchy?.any { it.route == tab.route } == true
+                // Thin top divider like Instagram
+                Divider(
+                    color = MaterialTheme.colors.onSurface.copy(alpha = 0.15f),
+                    thickness = 0.5.dp
+                )
+                BottomNavigation(
+                    backgroundColor = MaterialTheme.colors.surface,
+                    contentColor = MaterialTheme.colors.onSurface,
+                    elevation = 0.dp,
+                    modifier = Modifier.height(52.dp)
+                ) {
+                    tabs.forEach { tab ->
+                        val selected = currentDestination?.hierarchy?.any { it.route == tab.route } == true
 
-                    BottomNavigationItem(
-                        icon = {
-                            Icon(
-                                imageVector = tab.icon,
-                                contentDescription = tab.label
-                            )
-                        },
-                        label = {
-                            Text(
-                                text = tab.label,
-                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
-                            )
-                        },
-                        selected = selected,
-                        selectedContentColor = MaterialTheme.colors.primary,
-                        unselectedContentColor = MaterialTheme.colors.onSurface.copy(alpha = 0.4f),
-                        onClick = {
-                            navController.navigate(tab.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
+                        BottomNavigationItem(
+                            icon = {
+                                Icon(
+                                    imageVector = tab.icon,
+                                    contentDescription = tab.label,
+                                    modifier = Modifier.size(26.dp)
+                                )
+                            },
+                            label = null,
+                            alwaysShowLabel = false,
+                            selected = selected,
+                            selectedContentColor = MaterialTheme.colors.primary,
+                            unselectedContentColor = MaterialTheme.colors.onSurface.copy(alpha = 0.4f),
+                            onClick = {
+                                navController.navigate(tab.route) {
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
                                 }
-                                launchSingleTop = true
-                                restoreState = true
                             }
-                        }
-                    )
+                        )
+                    }
                 }
             }
         }

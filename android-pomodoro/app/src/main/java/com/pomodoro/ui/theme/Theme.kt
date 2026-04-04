@@ -104,7 +104,11 @@ fun PomodoroTheme(
         SideEffect {
             val window = (view.context as Activity).window
             window.statusBarColor = colors.background.toArgb()
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+            window.navigationBarColor = android.graphics.Color.TRANSPARENT
+            WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = !darkTheme
+                isAppearanceLightNavigationBars = !darkTheme
+            }
         }
     }
 
