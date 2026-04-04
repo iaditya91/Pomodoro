@@ -6,7 +6,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
+import com.pomodoro.BackupChecklistItem
 import com.pomodoro.BackupPayload
+import com.pomodoro.BackupSettings
 import com.pomodoro.DriveBackupHelper
 import com.pomodoro.MiniTaskGenerator
 import com.pomodoro.NotificationHelper
@@ -47,10 +49,20 @@ data class TodoTask(
     val text: String = ""
 )
 
+enum class CheckItemMode { CHECK, TYPE }
+
 data class FocusCheckItem(
     val text: String,
-    val isChecked: Boolean = false
-)
+    val mode: CheckItemMode = CheckItemMode.CHECK,
+    val isChecked: Boolean = false,
+    val typedText: String = ""
+) {
+    val isCompleted: Boolean
+        get() = when (mode) {
+            CheckItemMode.CHECK -> isChecked
+            CheckItemMode.TYPE -> typedText.trim().equals(text.trim(), ignoreCase = true)
+        }
+}
 
 data class TimerUiState(
     val mode: TimerMode = TimerMode.FOCUS,
@@ -99,9 +111,10 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun loadFocusChecklist(ctx: Context) {
-        val items = SettingsPrefs.loadFocusChecklist(ctx)
+        val items = SettingsPrefs.loadFocusChecklistItems(ctx)
+        val mode = SettingsPrefs.loadChecklistMode(ctx)
         val cur = _uiState.value ?: TimerUiState()
-        val checklist = items.map { FocusCheckItem(text = it) }
+        val checklist = items.map { FocusCheckItem(text = it, mode = mode) }
         _uiState.postValue(cur.copy(
             focusChecklist = checklist,
             checklistCompleted = checklist.isEmpty()
@@ -114,8 +127,18 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         if (index in updated.indices) {
             updated[index] = updated[index].copy(isChecked = !updated[index].isChecked)
         }
-        val allChecked = updated.isEmpty() || updated.all { it.isChecked }
-        _uiState.postValue(cur.copy(focusChecklist = updated, checklistCompleted = allChecked))
+        val allCompleted = updated.isEmpty() || updated.all { it.isCompleted }
+        _uiState.postValue(cur.copy(focusChecklist = updated, checklistCompleted = allCompleted))
+    }
+
+    fun updateChecklistTypedText(index: Int, text: String) {
+        val cur = _uiState.value ?: return
+        val updated = cur.focusChecklist.toMutableList()
+        if (index in updated.indices) {
+            updated[index] = updated[index].copy(typedText = text)
+        }
+        val allCompleted = updated.isEmpty() || updated.all { it.isCompleted }
+        _uiState.postValue(cur.copy(focusChecklist = updated, checklistCompleted = allCompleted))
     }
 
     fun toggleRunning() {
@@ -266,12 +289,25 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
     fun backupToDrive(ctx: Context) {
         val notes = _savedNotes.value ?: emptyList()
         val todos = _todoTasks.value ?: emptyList()
+        // Gather settings
+        val (f, r, b) = SettingsPrefs.loadPrefs(ctx)
+        val checklistItems = SettingsPrefs.loadFocusChecklistItems(ctx)
+        val checklistMode = SettingsPrefs.loadChecklistMode(ctx)
+        val theme = com.pomodoro.ui.theme.ThemePreference.currentTheme.value.name
+        val settings = BackupSettings(
+            focusMinutes = f,
+            reviewMinutes = r,
+            breakMinutes = b,
+            theme = theme,
+            checklistMode = checklistMode.name,
+            focusChecklist = checklistItems.map { BackupChecklistItem(text = it) }
+        )
         _backupStatus.postValue(BackupStatus.LOADING)
         viewModelScope.launch {
-            val result = DriveBackupHelper.backup(ctx, notes, todos)
+            val result = DriveBackupHelper.backup(ctx, notes, todos, settings)
             if (result.isSuccess) {
                 _backupStatus.postValue(BackupStatus.SUCCESS)
-                _backupMessage.postValue("Backed up ${notes.size} note(s), ${todos.size} task(s)")
+                _backupMessage.postValue("Backed up ${notes.size} note(s), ${todos.size} task(s), settings")
             } else {
                 _backupStatus.postValue(BackupStatus.ERROR)
                 _backupMessage.postValue(result.exceptionOrNull()?.message ?: "Backup failed")
@@ -287,8 +323,21 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
                 val payload = result.getOrNull() ?: return@launch
                 _savedNotes.postValue(payload.notes)
                 _todoTasks.postValue(payload.todoTasks)
+                // Restore settings if present
+                payload.settings?.let { s ->
+                    SettingsPrefs.savePrefs(ctx, s.focusMinutes, s.reviewMinutes, s.breakMinutes)
+                    reloadDurations(ctx)
+                    SettingsPrefs.saveFocusChecklistItems(ctx, s.focusChecklist.map { it.text })
+                    try {
+                        SettingsPrefs.saveChecklistMode(ctx, CheckItemMode.valueOf(s.checklistMode))
+                    } catch (_: Exception) { }
+                    try {
+                        val themeMode = com.pomodoro.ui.theme.ThemeMode.valueOf(s.theme)
+                        com.pomodoro.ui.theme.ThemePreference.save(ctx, themeMode)
+                    } catch (_: Exception) { }
+                }
                 _backupStatus.postValue(BackupStatus.SUCCESS)
-                _backupMessage.postValue("Restored ${payload.notes.size} note(s), ${payload.todoTasks.size} task(s)")
+                _backupMessage.postValue("Restored ${payload.notes.size} note(s), ${payload.todoTasks.size} task(s), settings")
             } else {
                 _backupStatus.postValue(BackupStatus.ERROR)
                 _backupMessage.postValue(result.exceptionOrNull()?.message ?: "Restore failed")
@@ -327,13 +376,18 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         startTicker()
     }
 
+    private fun buildChecklist(ctx: Context): List<FocusCheckItem> {
+        val items = SettingsPrefs.loadFocusChecklistItems(ctx)
+        val mode = SettingsPrefs.loadChecklistMode(ctx)
+        return items.map { FocusCheckItem(text = it, mode = mode) }
+    }
+
     fun startFocus(ctx: Context) {
         reloadDurations(ctx)
         val cur = _uiState.value ?: TimerUiState()
         if (cur.mode == TimerMode.REVIEW) saveCurrentReview()
         val millis = minutesToMillis(focusMinutes)
-        val checklistItems = SettingsPrefs.loadFocusChecklist(ctx)
-        val checklist = checklistItems.map { FocusCheckItem(text = it) }
+        val checklist = buildChecklist(ctx)
         val hasChecklist = checklist.isNotEmpty()
         _uiState.postValue(TimerUiState(
             mode = TimerMode.FOCUS,
@@ -350,8 +404,7 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         val cur = _uiState.value ?: TimerUiState()
         if (cur.mode == TimerMode.REVIEW) saveCurrentReview()
         val millis = minutesToMillis(focusMinutes)
-        val checklistItems = SettingsPrefs.loadFocusChecklist(ctx)
-        val checklist = checklistItems.map { FocusCheckItem(text = it) }
+        val checklist = buildChecklist(ctx)
         val hasChecklist = checklist.isNotEmpty()
         _uiState.postValue(TimerUiState(
             mode = TimerMode.FOCUS,

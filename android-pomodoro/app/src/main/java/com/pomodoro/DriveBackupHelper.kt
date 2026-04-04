@@ -23,9 +23,23 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 
+data class BackupSettings(
+    val focusMinutes: Int = 25,
+    val reviewMinutes: Int = 5,
+    val breakMinutes: Int = 15,
+    val theme: String = "SYSTEM",
+    val checklistMode: String = "CHECK",
+    val focusChecklist: List<BackupChecklistItem> = emptyList()
+)
+
+data class BackupChecklistItem(
+    val text: String = ""
+)
+
 data class BackupPayload(
     val notes: List<SavedReviewNote> = emptyList(),
-    val todoTasks: List<TodoTask> = emptyList()
+    val todoTasks: List<TodoTask> = emptyList(),
+    val settings: BackupSettings? = null
 )
 
 object DriveBackupHelper {
@@ -78,13 +92,13 @@ object DriveBackupHelper {
             .build()
     }
 
-    suspend fun backup(ctx: Context, notes: List<SavedReviewNote>, todoTasks: List<TodoTask> = emptyList()): Result<Unit> {
+    suspend fun backup(ctx: Context, notes: List<SavedReviewNote>, todoTasks: List<TodoTask> = emptyList(), settings: BackupSettings? = null): Result<Unit> {
         return withContext(Dispatchers.IO) {
             try {
                 val drive = getDriveService(ctx) ?: return@withContext Result.failure(
                     Exception("Not signed in")
                 )
-                val payload = BackupPayload(notes = notes, todoTasks = todoTasks)
+                val payload = BackupPayload(notes = notes, todoTasks = todoTasks, settings = settings)
                 val json = Gson().toJson(payload)
                 val content = ByteArrayContent.fromString(BACKUP_MIME, json)
 

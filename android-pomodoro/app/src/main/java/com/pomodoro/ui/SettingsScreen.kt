@@ -53,6 +53,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -72,6 +73,7 @@ object SettingsPrefs {
     private const val KEY_REVIEW = "review_minutes"
     private const val KEY_BREAK = "break_minutes"
     private const val KEY_FOCUS_CHECKLIST = "focus_checklist"
+    private const val KEY_CHECKLIST_MODE = "checklist_mode"
 
     fun loadPrefs(ctx: Context): Triple<Int, Int, Int> {
         val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -91,17 +93,30 @@ object SettingsPrefs {
             .apply()
     }
 
-    fun loadFocusChecklist(ctx: Context): List<String> {
+    fun loadFocusChecklistItems(ctx: Context): List<String> {
         val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val raw = prefs.getString(KEY_FOCUS_CHECKLIST, "") ?: ""
         if (raw.isBlank()) return emptyList()
         return raw.split("\n").filter { it.isNotBlank() }
     }
 
-    fun saveFocusChecklist(ctx: Context, items: List<String>) {
+    fun saveFocusChecklistItems(ctx: Context, items: List<String>) {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_FOCUS_CHECKLIST, items.joinToString("\n"))
+            .apply()
+    }
+
+    fun loadChecklistMode(ctx: Context): CheckItemMode {
+        val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val mode = prefs.getString(KEY_CHECKLIST_MODE, "CHECK") ?: "CHECK"
+        return try { CheckItemMode.valueOf(mode) } catch (_: Exception) { CheckItemMode.CHECK }
+    }
+
+    fun saveChecklistMode(ctx: Context, mode: CheckItemMode) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_CHECKLIST_MODE, mode.name)
             .apply()
     }
 }
@@ -235,12 +250,13 @@ fun SettingsScreen(
 
 @Composable
 private fun FocusChecklistSection(ctx: Context) {
-    var items by remember { mutableStateOf(SettingsPrefs.loadFocusChecklist(ctx)) }
+    var items by remember { mutableStateOf(SettingsPrefs.loadFocusChecklistItems(ctx)) }
+    var mode by remember { mutableStateOf(SettingsPrefs.loadChecklistMode(ctx)) }
     var newItemText by remember { mutableStateOf("") }
 
-    fun save(updated: List<String>) {
+    fun saveItems(updated: List<String>) {
         items = updated
-        SettingsPrefs.saveFocusChecklist(ctx, updated)
+        SettingsPrefs.saveFocusChecklistItems(ctx, updated)
     }
 
     Card(
@@ -262,9 +278,68 @@ private fun FocusChecklistSection(ctx: Context) {
             Spacer(modifier = Modifier.height(4.dp))
 
             Text(
-                text = "Items must be checked before the focus timer runs",
+                text = "Items must be completed before the focus timer runs",
                 style = MaterialTheme.typography.caption,
                 color = MaterialTheme.colors.onSurface.copy(alpha = 0.5f)
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Global mode toggle: Check / Type
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colors.background)
+                    .padding(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val isCheck = mode == CheckItemMode.CHECK
+                Text(
+                    text = "Check",
+                    style = MaterialTheme.typography.body2,
+                    fontWeight = if (isCheck) FontWeight.Bold else FontWeight.Normal,
+                    color = if (isCheck) MaterialTheme.colors.onPrimary
+                        else MaterialTheme.colors.onSurface.copy(alpha = 0.5f),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (isCheck) MaterialTheme.colors.primary else Color.Transparent)
+                        .clickable {
+                            mode = CheckItemMode.CHECK
+                            SettingsPrefs.saveChecklistMode(ctx, CheckItemMode.CHECK)
+                        }
+                        .padding(vertical = 8.dp)
+                )
+                Text(
+                    text = "Type",
+                    style = MaterialTheme.typography.body2,
+                    fontWeight = if (!isCheck) FontWeight.Bold else FontWeight.Normal,
+                    color = if (!isCheck) MaterialTheme.colors.onPrimary
+                        else MaterialTheme.colors.onSurface.copy(alpha = 0.5f),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (!isCheck) MaterialTheme.colors.primary else Color.Transparent)
+                        .clickable {
+                            mode = CheckItemMode.TYPE
+                            SettingsPrefs.saveChecklistMode(ctx, CheckItemMode.TYPE)
+                        }
+                        .padding(vertical = 8.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text(
+                text = if (mode == CheckItemMode.CHECK)
+                    "Tick each item to start focus"
+                else
+                    "Type each item to start focus",
+                style = MaterialTheme.typography.caption,
+                color = MaterialTheme.colors.onSurface.copy(alpha = 0.4f)
             )
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -289,7 +364,7 @@ private fun FocusChecklistSection(ctx: Context) {
                         modifier = Modifier.weight(1f)
                     )
                     IconButton(
-                        onClick = { save(items.toMutableList().also { it.removeAt(index) }) },
+                        onClick = { saveItems(items.toMutableList().also { it.removeAt(index) }) },
                         modifier = Modifier.size(28.dp)
                     ) {
                         Icon(
@@ -334,7 +409,7 @@ private fun FocusChecklistSection(ctx: Context) {
                     keyboardActions = KeyboardActions(
                         onDone = {
                             if (newItemText.isNotBlank()) {
-                                save(items + newItemText.trim())
+                                saveItems(items + newItemText.trim())
                                 newItemText = ""
                             }
                         }
@@ -347,7 +422,7 @@ private fun FocusChecklistSection(ctx: Context) {
                 IconButton(
                     onClick = {
                         if (newItemText.isNotBlank()) {
-                            save(items + newItemText.trim())
+                            saveItems(items + newItemText.trim())
                             newItemText = ""
                         }
                     },

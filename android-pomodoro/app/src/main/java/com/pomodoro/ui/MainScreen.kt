@@ -178,7 +178,8 @@ fun MainScreen(viewModel: TimerViewModel = viewModel()) {
             FocusChecklistCard(
                 checklist = state.focusChecklist,
                 accentColor = accentColor,
-                onToggle = { viewModel.toggleChecklistItem(it) }
+                onToggle = { viewModel.toggleChecklistItem(it) },
+                onTypeText = { index, text -> viewModel.updateChecklistTypedText(index, text) }
             )
         }
 
@@ -186,7 +187,7 @@ fun MainScreen(viewModel: TimerViewModel = viewModel()) {
         LaunchedEffect(state.checklistCompleted, state.mode) {
             if (state.mode == TimerMode.FOCUS && state.checklistCompleted
                 && !state.isRunning && state.focusChecklist.isNotEmpty()
-                && state.focusChecklist.all { it.isChecked }) {
+                && state.focusChecklist.all { it.isCompleted }) {
                 viewModel.toggleRunning()
             }
         }
@@ -693,7 +694,8 @@ private fun ReviewQuestionCard(
 private fun FocusChecklistCard(
     checklist: List<FocusCheckItem>,
     accentColor: Color,
-    onToggle: (Int) -> Unit
+    onToggle: (Int) -> Unit,
+    onTypeText: (Int, String) -> Unit
 ) {
     Card(
         backgroundColor = MaterialTheme.colors.surface,
@@ -714,32 +716,90 @@ private fun FocusChecklistCard(
             Spacer(modifier = Modifier.height(10.dp))
 
             checklist.forEachIndexed { index, item ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { onToggle(index) }
-                        .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Checkbox(
-                        checked = item.isChecked,
-                        onCheckedChange = { onToggle(index) },
-                        colors = CheckboxDefaults.colors(
-                            checkedColor = accentColor,
-                            uncheckedColor = MaterialTheme.colors.onSurface.copy(alpha = 0.3f),
-                            checkmarkColor = Color.White
-                        )
-                    )
-                    Text(
-                        text = item.text,
-                        style = MaterialTheme.typography.body2,
-                        color = if (item.isChecked)
-                            MaterialTheme.colors.onSurface.copy(alpha = 0.4f)
-                        else
-                            MaterialTheme.colors.onSurface,
-                        textDecoration = if (item.isChecked) TextDecoration.LineThrough else TextDecoration.None
-                    )
+                when (item.mode) {
+                    CheckItemMode.CHECK -> {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { onToggle(index) }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = item.isChecked,
+                                onCheckedChange = { onToggle(index) },
+                                colors = CheckboxDefaults.colors(
+                                    checkedColor = accentColor,
+                                    uncheckedColor = MaterialTheme.colors.onSurface.copy(alpha = 0.3f),
+                                    checkmarkColor = Color.White
+                                )
+                            )
+                            Text(
+                                text = item.text,
+                                style = MaterialTheme.typography.body2,
+                                color = if (item.isChecked)
+                                    MaterialTheme.colors.onSurface.copy(alpha = 0.4f)
+                                else
+                                    MaterialTheme.colors.onSurface,
+                                textDecoration = if (item.isChecked) TextDecoration.LineThrough else TextDecoration.None
+                            )
+                        }
+                    }
+                    CheckItemMode.TYPE -> {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = "Type: \"${item.text}\"",
+                                style = MaterialTheme.typography.caption,
+                                fontWeight = FontWeight.Medium,
+                                color = if (item.isCompleted) accentColor
+                                    else MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            OutlinedTextField(
+                                value = item.typedText,
+                                onValueChange = { onTypeText(index, it) },
+                                placeholder = {
+                                    Text(
+                                        "Type to confirm...",
+                                        color = MaterialTheme.colors.onSurface.copy(alpha = 0.3f),
+                                        style = MaterialTheme.typography.body2
+                                    )
+                                },
+                                singleLine = true,
+                                enabled = !item.isCompleted,
+                                shape = RoundedCornerShape(12.dp),
+                                colors = TextFieldDefaults.outlinedTextFieldColors(
+                                    focusedBorderColor = if (item.isCompleted) accentColor else accentColor.copy(alpha = 0.5f),
+                                    unfocusedBorderColor = if (item.isCompleted) accentColor.copy(alpha = 0.5f)
+                                        else MaterialTheme.colors.onSurface.copy(alpha = 0.15f),
+                                    textColor = MaterialTheme.colors.onSurface,
+                                    cursorColor = accentColor,
+                                    backgroundColor = MaterialTheme.colors.surface,
+                                    disabledBorderColor = accentColor.copy(alpha = 0.5f),
+                                    disabledTextColor = MaterialTheme.colors.onSurface.copy(alpha = 0.4f)
+                                ),
+                                textStyle = MaterialTheme.typography.body2,
+                                keyboardOptions = KeyboardOptions(
+                                    capitalization = KeyboardCapitalization.Sentences,
+                                    imeAction = ImeAction.Done
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            if (item.isCompleted) {
+                                Text(
+                                    text = "\u2713 Confirmed",
+                                    style = MaterialTheme.typography.caption,
+                                    color = accentColor,
+                                    modifier = Modifier.padding(top = 2.dp, start = 4.dp)
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
