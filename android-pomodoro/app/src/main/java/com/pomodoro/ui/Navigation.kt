@@ -1,6 +1,8 @@
 package com.pomodoro.ui
 
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.BottomNavigation
 import androidx.compose.material.BottomNavigationItem
 import androidx.compose.material.Icon
@@ -41,12 +43,13 @@ fun PomodoroNavHost(modifier: Modifier = Modifier) {
     val ctx = LocalContext.current
 
     Scaffold(
-        modifier = modifier,
+        modifier = modifier.statusBarsPadding(),
         bottomBar = {
             val navBackStackEntry by navController.currentBackStackEntryAsState()
             val currentDestination = navBackStackEntry?.destination
 
             BottomNavigation(
+                modifier = Modifier.navigationBarsPadding(),
                 backgroundColor = MaterialTheme.colors.surface,
                 contentColor = MaterialTheme.colors.onSurface,
                 elevation = 8.dp
