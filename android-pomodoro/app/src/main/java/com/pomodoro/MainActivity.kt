@@ -8,10 +8,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.core.content.ContextCompat
 import com.pomodoro.ui.PomodoroApp
+import com.pomodoro.ui.TimerViewModel
 
 class MainActivity : ComponentActivity() {
+
+    private val timerViewModel: TimerViewModel by viewModels()
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -24,6 +28,11 @@ class MainActivity : ComponentActivity() {
         setContent {
             PomodoroApp()
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        timerViewModel.syncFromDeadline()
     }
 
     private fun requestNotificationPermission() {

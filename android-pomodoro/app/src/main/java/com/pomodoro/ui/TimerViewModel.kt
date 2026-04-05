@@ -14,6 +14,7 @@ import com.pomodoro.MiniTaskGenerator
 import com.pomodoro.NotificationHelper
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import com.pomodoro.TimerForegroundService
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -123,6 +124,7 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
     private var currentCycle = 0
 
     private var tickJob: Job? = null
+    private var deadlineMillis: Long = 0L  // absolute time when timer ends
 
     // defaults (minutes)
     private var focusMinutes = 25
@@ -218,26 +220,32 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toggleRunning() {
         val cur = _uiState.value ?: return
-        if (cur.isRunning) stopTicker() else startTicker()
+        if (cur.isRunning) {
+            stopTicker()
+        } else {
+            deadlineMillis = System.currentTimeMillis() + cur.remainingMillis
+            startTicker()
+        }
         _uiState.postValue(cur.copy(isRunning = !cur.isRunning))
     }
 
     private fun startTicker() {
         tickJob?.cancel()
+        val app = getApplication<Application>()
+        val cur = _uiState.value ?: return
+        TimerForegroundService.start(app, deadlineMillis, cur.mode)
         tickJob = viewModelScope.launch {
             while (true) {
                 delay(1000L)
-                val cur = _uiState.value ?: continue
-                if (cur.remainingMillis <= 0L) {
-                    _uiState.postValue(cur.copy(remainingMillis = 0L, isRunning = false))
+                val remaining = (deadlineMillis - System.currentTimeMillis()).coerceAtLeast(0L)
+                val latest = _uiState.value ?: continue
+                if (remaining <= 0L) {
+                    _uiState.postValue(latest.copy(remainingMillis = 0L, isRunning = false))
                     tickJob?.cancel()
-                    NotificationHelper.notifyTimerComplete(
-                        getApplication(),
-                        cur.mode
-                    )
+                    // Service handles its own completion notification
                     break
                 } else {
-                    _uiState.postValue(cur.copy(remainingMillis = cur.remainingMillis - 1000L))
+                    _uiState.postValue(latest.copy(remainingMillis = remaining))
                 }
             }
         }
@@ -246,6 +254,20 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
     private fun stopTicker() {
         tickJob?.cancel()
         tickJob = null
+        TimerForegroundService.stop(getApplication())
+    }
+
+    fun syncFromDeadline() {
+        if (!TimerForegroundService.isServiceRunning) return
+        val remaining = (TimerForegroundService.deadlineMillis - System.currentTimeMillis()).coerceAtLeast(0L)
+        val cur = _uiState.value ?: return
+        if (remaining <= 0L) {
+            _uiState.postValue(cur.copy(remainingMillis = 0L, isRunning = false))
+        } else {
+            deadlineMillis = TimerForegroundService.deadlineMillis
+            _uiState.postValue(cur.copy(remainingMillis = remaining, isRunning = true))
+            startTicker()
+        }
     }
 
     fun totalMillisForMode(mode: TimerMode): Long = minutesToMillis(durationForMode(mode))
@@ -429,6 +451,7 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         reloadDurations(ctx)
         val cur = _uiState.value ?: TimerUiState()
         val millis = minutesToMillis(reviewMinutes)
+        deadlineMillis = System.currentTimeMillis() + millis
         _uiState.postValue(cur.copy(
             mode = TimerMode.REVIEW,
             remainingMillis = millis,
@@ -443,6 +466,7 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         val cur = _uiState.value ?: TimerUiState()
         if (cur.mode == TimerMode.REVIEW) saveCurrentReview()
         val millis = minutesToMillis(breakMinutes)
+        deadlineMillis = System.currentTimeMillis() + millis
         _uiState.postValue(cur.copy(
             mode = TimerMode.BREAK,
             remainingMillis = millis,
@@ -471,7 +495,10 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
             focusChecklist = checklist,
             checklistCompleted = !hasChecklist
         ))
-        if (!hasChecklist) startTicker()
+        if (!hasChecklist) {
+            deadlineMillis = System.currentTimeMillis() + millis
+            startTicker()
+        }
     }
 
     fun startFocusWithTask(ctx: Context, taskName: String) {
@@ -489,7 +516,10 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
             focusChecklist = checklist,
             checklistCompleted = !hasChecklist
         ))
-        if (!hasChecklist) startTicker()
+        if (!hasChecklist) {
+            deadlineMillis = System.currentTimeMillis() + millis
+            startTicker()
+        }
     }
 
     // --- Todo Tasks ---
@@ -571,7 +601,10 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
             focusChecklist = checklist,
             checklistCompleted = !hasChecklist
         ))
-        if (!hasChecklist) startTicker()
+        if (!hasChecklist) {
+            deadlineMillis = System.currentTimeMillis() + millis
+            startTicker()
+        }
     }
 
     fun advanceRoutine(ctx: Context) {
@@ -583,6 +616,7 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
                 if (routine.reviewEnabled) {
                     if (!routine.useDefaultSettings) reviewMinutes = routine.reviewMinutes
                     val millis = minutesToMillis(reviewMinutes)
+                    deadlineMillis = System.currentTimeMillis() + millis
                     _uiState.postValue(cur.copy(
                         mode = TimerMode.REVIEW,
                         remainingMillis = millis,
@@ -594,6 +628,7 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
                     if (!routine.useDefaultSettings) breakMinutes = routine.breakMinutes
                     if (cur.mode == TimerMode.REVIEW) saveCurrentReview()
                     val millis = minutesToMillis(breakMinutes)
+                    deadlineMillis = System.currentTimeMillis() + millis
                     _uiState.postValue(cur.copy(
                         mode = TimerMode.BREAK,
                         remainingMillis = millis,
@@ -609,6 +644,7 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
                 if (routine.breakEnabled) {
                     if (!routine.useDefaultSettings) breakMinutes = routine.breakMinutes
                     val millis = minutesToMillis(breakMinutes)
+                    deadlineMillis = System.currentTimeMillis() + millis
                     _uiState.postValue(cur.copy(
                         mode = TimerMode.BREAK,
                         remainingMillis = millis,
@@ -642,7 +678,10 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
                 focusChecklist = checklist,
                 checklistCompleted = !hasChecklist
             ))
-            if (!hasChecklist) startTicker()
+            if (!hasChecklist) {
+                deadlineMillis = System.currentTimeMillis() + millis
+                startTicker()
+            }
         } else {
             activeRoutine = null
             currentCycle = 0
