@@ -18,6 +18,7 @@ import com.pomodoro.TimerForegroundService
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.util.Calendar
 
 enum class TimerMode { FOCUS, REVIEW, BREAK }
 
@@ -51,11 +52,21 @@ data class SavedReviewNote(
 
 enum class TodoSection { TODAY, PLANNED }
 
+data class TodoSubtask(
+    val id: Long = System.nanoTime(),
+    val text: String = "",
+    val isDone: Boolean = false
+)
+
 data class TodoTask(
     val id: Long = System.nanoTime(),
     val text: String = "",
     val section: TodoSection = TodoSection.PLANNED,
-    val isDone: Boolean = false
+    val isDone: Boolean = false,
+    val description: String = "",
+    val subtasks: List<TodoSubtask> = emptyList(),
+    val scheduledDate: Long? = null,
+    val scheduledTime: Long? = null
 )
 
 data class RoutineSubtask(
@@ -138,6 +149,7 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         NotificationHelper.createChannel(application)
         _uiState.value = TimerUiState(remainingMillis = minutesToMillis(focusMinutes))
         loadPersistedData()
+        promoteScheduledTasks()
         _savedNotes.observeForever { persistNotes(it) }
         _todoTasks.observeForever { persistTodos(it) }
         _routines.observeForever { persistRoutines(it) }
@@ -501,18 +513,22 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun startFocusWithTask(ctx: Context, taskName: String) {
+    fun startFocusWithTask(ctx: Context, taskName: String, todoSubtasks: List<TodoSubtask> = emptyList()) {
         reloadDurations(ctx)
         val cur = _uiState.value ?: TimerUiState()
         if (cur.mode == TimerMode.REVIEW) saveCurrentReview()
         val millis = minutesToMillis(focusMinutes)
         val checklist = buildChecklist(ctx)
         val hasChecklist = checklist.isNotEmpty()
+        val focusSubtasks = todoSubtasks.map { sub ->
+            Subtask(id = sub.id, text = sub.text, isDone = sub.isDone)
+        }
         _uiState.postValue(TimerUiState(
             mode = TimerMode.FOCUS,
             remainingMillis = millis,
             isRunning = !hasChecklist,
             taskName = taskName,
+            subtasks = focusSubtasks,
             focusChecklist = checklist,
             checklistCompleted = !hasChecklist
         ))
@@ -553,6 +569,60 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         val existing = _todoTasks.value ?: return
         _todoTasks.postValue(existing.map {
             if (it.id == id) it.copy(isDone = !it.isDone) else it
+        })
+    }
+
+    private fun promoteScheduledTasks() {
+        val tasks = _todoTasks.value ?: return
+        val today = Calendar.getInstance()
+        val todayYear = today.get(Calendar.YEAR)
+        val todayDay = today.get(Calendar.DAY_OF_YEAR)
+
+        val updated = tasks.map { task ->
+            if (task.section == TodoSection.PLANNED && task.scheduledDate != null) {
+                val taskCal = Calendar.getInstance().apply { timeInMillis = task.scheduledDate }
+                if (taskCal.get(Calendar.YEAR) == todayYear && taskCal.get(Calendar.DAY_OF_YEAR) == todayDay) {
+                    task.copy(section = TodoSection.TODAY)
+                } else task
+            } else task
+        }
+        if (updated != tasks) _todoTasks.value = updated
+    }
+
+    fun updateTodoTask(id: Long, name: String, description: String, subtasks: List<TodoSubtask>, scheduledDate: Long?, scheduledTime: Long?) {
+        val existing = _todoTasks.value ?: return
+        val today = Calendar.getInstance()
+        val todayYear = today.get(Calendar.YEAR)
+        val todayDay = today.get(Calendar.DAY_OF_YEAR)
+
+        _todoTasks.postValue(existing.map {
+            if (it.id == id) {
+                val isDateToday = scheduledDate != null && Calendar.getInstance().apply {
+                    timeInMillis = scheduledDate
+                }.let { cal -> cal.get(Calendar.YEAR) == todayYear && cal.get(Calendar.DAY_OF_YEAR) == todayDay }
+
+                val newSection = if (isDateToday && it.section == TodoSection.PLANNED) TodoSection.TODAY else it.section
+
+                it.copy(
+                    text = name.trim().ifBlank { it.text },
+                    description = description,
+                    subtasks = subtasks.filter { s -> s.text.isNotBlank() },
+                    scheduledDate = scheduledDate,
+                    scheduledTime = scheduledTime,
+                    section = newSection
+                )
+            } else it
+        })
+    }
+
+    fun toggleTodoSubtask(taskId: Long, subtaskId: Long) {
+        val existing = _todoTasks.value ?: return
+        _todoTasks.postValue(existing.map { task ->
+            if (task.id == taskId) {
+                task.copy(subtasks = task.subtasks.map { sub ->
+                    if (sub.id == subtaskId) sub.copy(isDone = !sub.isDone) else sub
+                })
+            } else task
         })
     }
 

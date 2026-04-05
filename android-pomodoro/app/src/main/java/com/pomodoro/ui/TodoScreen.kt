@@ -48,6 +48,14 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.material.icons.filled.Edit
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun TodoScreen(
@@ -63,6 +71,7 @@ fun TodoScreen(
 
     var todayExpanded by rememberSaveable { mutableStateOf(true) }
     var plannedExpanded by rememberSaveable { mutableStateOf(true) }
+    var editingTask by remember { mutableStateOf<TodoTask?>(null) }
 
     Column(
         modifier = Modifier
@@ -188,11 +197,11 @@ fun TodoScreen(
                                 task = task,
                                 onToggleDone = { viewModel.toggleTodoDone(task.id) },
                                 onPlay = {
-                                    viewModel.startFocusWithTask(ctx, task.text)
+                                    viewModel.startFocusWithTask(ctx, task.text, task.subtasks)
                                     onStartTask()
                                 },
                                 onDelete = { viewModel.removeTodoTask(task.id) },
-                                onMove = { viewModel.moveTodoToPlanned(task.id) }
+                                onEdit = { editingTask = task }
                             )
                         }
                     }
@@ -228,11 +237,12 @@ fun TodoScreen(
                             PlannedTaskCard(
                                 task = task,
                                 onPlay = {
-                                    viewModel.startFocusWithTask(ctx, task.text)
+                                    viewModel.startFocusWithTask(ctx, task.text, task.subtasks)
                                     onStartTask()
                                 },
                                 onDelete = { viewModel.removeTodoTask(task.id) },
-                                onMove = { viewModel.moveTodoToToday(task.id) }
+                                onMove = { viewModel.moveTodoToToday(task.id) },
+                                onEdit = { editingTask = task }
                             )
                         }
                     }
@@ -241,6 +251,22 @@ fun TodoScreen(
         }
 
         Spacer(modifier = Modifier.height(80.dp))
+    }
+
+    // Task detail editing dialog
+    editingTask?.let { task ->
+        TaskDetailDialog(
+            task = task,
+            isToday = task.section == TodoSection.TODAY,
+            onDismiss = { editingTask = null },
+            onSave = { name, desc, subtasks, date, time ->
+                viewModel.updateTodoTask(task.id, name, desc, subtasks, date, time)
+                editingTask = null
+            },
+            onMovePlanned = if (task.section == TodoSection.TODAY) {
+                { viewModel.moveTodoToPlanned(task.id) }
+            } else null
+        )
     }
 }
 
@@ -317,8 +343,10 @@ private fun TodayTaskCard(
     onToggleDone: () -> Unit,
     onPlay: () -> Unit,
     onDelete: () -> Unit,
-    onMove: () -> Unit
+    onEdit: () -> Unit
 ) {
+    val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
+
     Card(
         backgroundColor = MaterialTheme.colors.surface,
         shape = RoundedCornerShape(16.dp),
@@ -358,6 +386,20 @@ private fun TodayTaskCard(
                     }
 
                     Spacer(modifier = Modifier.width(4.dp))
+
+                    IconButton(
+                        onClick = onEdit,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = "Edit task details",
+                            tint = MaterialTheme.colors.onSurface.copy(alpha = 0.5f),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(4.dp))
                 }
 
                 IconButton(
@@ -373,17 +415,37 @@ private fun TodayTaskCard(
                 }
             }
 
-            if (!task.isDone) {
-                Text(
-                    text = "Move to Planned",
-                    style = MaterialTheme.typography.caption,
-                    color = MaterialTheme.colors.primary,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier
-                        .clickable { onMove() }
-                        .padding(start = 16.dp, end = 16.dp, bottom = 10.dp)
-                )
+            // Show description, subtask count, and time if set
+            if (task.description.isNotBlank() || task.scheduledTime != null || task.subtasks.isNotEmpty()) {
+                Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 4.dp)) {
+                    if (task.description.isNotBlank()) {
+                        Text(
+                            text = task.description,
+                            style = MaterialTheme.typography.body2,
+                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.55f),
+                            maxLines = 2
+                        )
+                    }
+                    if (task.subtasks.isNotEmpty()) {
+                        val done = task.subtasks.count { it.isDone }
+                        Text(
+                            text = "$done/${task.subtasks.size} subtasks",
+                            style = MaterialTheme.typography.caption,
+                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.5f),
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
+                    if (task.scheduledTime != null) {
+                        Text(
+                            text = timeFormat.format(Date(task.scheduledTime)),
+                            style = MaterialTheme.typography.caption,
+                            color = MaterialTheme.colors.primary.copy(alpha = 0.8f),
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
+                }
             }
+
         }
     }
 }
@@ -393,8 +455,12 @@ private fun PlannedTaskCard(
     task: TodoTask,
     onPlay: () -> Unit,
     onDelete: () -> Unit,
-    onMove: () -> Unit
+    onMove: () -> Unit,
+    onEdit: () -> Unit
 ) {
+    val dateFormat = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
+    val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
+
     Card(
         backgroundColor = MaterialTheme.colors.surface,
         shape = RoundedCornerShape(16.dp),
@@ -428,6 +494,20 @@ private fun PlannedTaskCard(
                 Spacer(modifier = Modifier.width(4.dp))
 
                 IconButton(
+                    onClick = onEdit,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = "Edit task details",
+                        tint = MaterialTheme.colors.onSurface.copy(alpha = 0.5f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(4.dp))
+
+                IconButton(
                     onClick = onDelete,
                     modifier = Modifier.size(36.dp)
                 ) {
@@ -437,6 +517,44 @@ private fun PlannedTaskCard(
                         tint = MaterialTheme.colors.onSurface.copy(alpha = 0.35f),
                         modifier = Modifier.size(20.dp)
                     )
+                }
+            }
+
+            // Show description, subtask count, and scheduled info if set
+            if (task.description.isNotBlank() || task.subtasks.isNotEmpty() || task.scheduledDate != null || task.scheduledTime != null) {
+                Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 4.dp)) {
+                    if (task.description.isNotBlank()) {
+                        Text(
+                            text = task.description,
+                            style = MaterialTheme.typography.body2,
+                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.55f),
+                            maxLines = 2
+                        )
+                    }
+                    if (task.subtasks.isNotEmpty()) {
+                        val done = task.subtasks.count { it.isDone }
+                        Text(
+                            text = "$done/${task.subtasks.size} subtasks",
+                            style = MaterialTheme.typography.caption,
+                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.5f),
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
+                    val scheduleInfo = buildString {
+                        if (task.scheduledDate != null) append(dateFormat.format(Date(task.scheduledDate)))
+                        if (task.scheduledTime != null) {
+                            if (isNotEmpty()) append(" at ")
+                            append(timeFormat.format(Date(task.scheduledTime)))
+                        }
+                    }
+                    if (scheduleInfo.isNotEmpty()) {
+                        Text(
+                            text = scheduleInfo,
+                            style = MaterialTheme.typography.caption,
+                            color = MaterialTheme.colors.primary.copy(alpha = 0.8f),
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
                 }
             }
 
@@ -450,6 +568,359 @@ private fun PlannedTaskCard(
                     .clickable { onMove() }
                     .padding(start = 16.dp, end = 16.dp, bottom = 10.dp)
             )
+        }
+    }
+}
+
+@Composable
+private fun TaskDetailDialog(
+    task: TodoTask,
+    isToday: Boolean,
+    onDismiss: () -> Unit,
+    onSave: (name: String, description: String, subtasks: List<TodoSubtask>, date: Long?, time: Long?) -> Unit,
+    onMovePlanned: (() -> Unit)? = null
+) {
+    val ctx = LocalContext.current
+    var taskName by remember { mutableStateOf(task.text) }
+    var description by remember { mutableStateOf(task.description) }
+    var subtasks by remember { mutableStateOf(task.subtasks) }
+    var newSubtaskText by remember { mutableStateOf("") }
+    var selectedDate by remember { mutableStateOf(task.scheduledDate) }
+    var selectedTime by remember { mutableStateOf(task.scheduledTime) }
+
+    val dateFormat = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
+    val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            shape = RoundedCornerShape(20.dp),
+            backgroundColor = MaterialTheme.colors.surface,
+            elevation = 8.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(20.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                // Task name field
+                Text(
+                    text = "Task Name",
+                    style = MaterialTheme.typography.caption,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = taskName,
+                    onValueChange = { taskName = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = TextFieldDefaults.outlinedTextFieldColors(
+                        backgroundColor = MaterialTheme.colors.background,
+                        focusedBorderColor = MaterialTheme.colors.primary,
+                        unfocusedBorderColor = MaterialTheme.colors.onSurface.copy(alpha = 0.15f),
+                        cursorColor = MaterialTheme.colors.primary,
+                        textColor = MaterialTheme.colors.onSurface
+                    ),
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.body1.copy(fontWeight = FontWeight.Bold),
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Sentences,
+                        imeAction = ImeAction.Next
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Description field
+                Text(
+                    text = "Description",
+                    style = MaterialTheme.typography.caption,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    placeholder = {
+                        Text(
+                            "Add details...",
+                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.4f)
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = TextFieldDefaults.outlinedTextFieldColors(
+                        backgroundColor = MaterialTheme.colors.background,
+                        focusedBorderColor = MaterialTheme.colors.primary,
+                        unfocusedBorderColor = MaterialTheme.colors.onSurface.copy(alpha = 0.15f),
+                        cursorColor = MaterialTheme.colors.primary,
+                        textColor = MaterialTheme.colors.onSurface
+                    ),
+                    maxLines = 4,
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Sentences
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Subtasks section
+                Text(
+                    text = "Subtasks",
+                    style = MaterialTheme.typography.caption,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+
+                subtasks.forEach { sub ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = sub.text,
+                            style = MaterialTheme.typography.body2,
+                            color = MaterialTheme.colors.onSurface,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = {
+                                subtasks = subtasks.filter { it.id != sub.id }
+                            },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Remove subtask",
+                                tint = MaterialTheme.colors.onSurface.copy(alpha = 0.35f),
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = newSubtaskText,
+                        onValueChange = { newSubtaskText = it },
+                        placeholder = {
+                            Text(
+                                "Add subtask...",
+                                color = MaterialTheme.colors.onSurface.copy(alpha = 0.4f)
+                            )
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = TextFieldDefaults.outlinedTextFieldColors(
+                            backgroundColor = MaterialTheme.colors.background,
+                            focusedBorderColor = MaterialTheme.colors.primary,
+                            unfocusedBorderColor = MaterialTheme.colors.onSurface.copy(alpha = 0.15f),
+                            cursorColor = MaterialTheme.colors.primary,
+                            textColor = MaterialTheme.colors.onSurface
+                        ),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            capitalization = KeyboardCapitalization.Sentences,
+                            imeAction = ImeAction.Done
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onDone = {
+                                if (newSubtaskText.isNotBlank()) {
+                                    subtasks = subtasks + TodoSubtask(text = newSubtaskText.trim())
+                                    newSubtaskText = ""
+                                }
+                            }
+                        )
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    IconButton(
+                        onClick = {
+                            if (newSubtaskText.isNotBlank()) {
+                                subtasks = subtasks + TodoSubtask(text = newSubtaskText.trim())
+                                newSubtaskText = ""
+                            }
+                        },
+                        modifier = Modifier
+                            .size(36.dp)
+                            .background(
+                                MaterialTheme.colors.primary,
+                                RoundedCornerShape(10.dp)
+                            )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Add subtask",
+                            tint = MaterialTheme.colors.onPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Date picker row
+                Text(
+                    text = "Date",
+                    style = MaterialTheme.typography.caption,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            MaterialTheme.colors.background,
+                            RoundedCornerShape(12.dp)
+                        )
+                        .let { mod ->
+                            if (isToday) mod else mod.clickable {
+                                val cal = Calendar.getInstance()
+                                if (selectedDate != null) cal.timeInMillis = selectedDate!!
+                                DatePickerDialog(
+                                    ctx,
+                                    { _, y, m, d ->
+                                        val picked = Calendar.getInstance()
+                                        picked.set(y, m, d, 0, 0, 0)
+                                        picked.set(Calendar.MILLISECOND, 0)
+                                        selectedDate = picked.timeInMillis
+                                    },
+                                    cal.get(Calendar.YEAR),
+                                    cal.get(Calendar.MONTH),
+                                    cal.get(Calendar.DAY_OF_MONTH)
+                                ).show()
+                            }
+                        }
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (isToday) "Today"
+                        else if (selectedDate != null) dateFormat.format(Date(selectedDate!!))
+                        else "Pick a date",
+                        style = MaterialTheme.typography.body1,
+                        color = if (isToday)
+                            MaterialTheme.colors.onSurface.copy(alpha = 0.4f)
+                        else if (selectedDate != null)
+                            MaterialTheme.colors.onSurface
+                        else
+                            MaterialTheme.colors.onSurface.copy(alpha = 0.4f)
+                    )
+                    if (isToday) {
+                        Spacer(modifier = Modifier.weight(1f))
+                        Text(
+                            text = "Disabled for today tasks",
+                            style = MaterialTheme.typography.caption,
+                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.3f)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Time picker row
+                Text(
+                    text = "Time",
+                    style = MaterialTheme.typography.caption,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            MaterialTheme.colors.background,
+                            RoundedCornerShape(12.dp)
+                        )
+                        .clickable {
+                            val cal = Calendar.getInstance()
+                            if (selectedTime != null) cal.timeInMillis = selectedTime!!
+                            TimePickerDialog(
+                                ctx,
+                                { _, h, m ->
+                                    val picked = Calendar.getInstance()
+                                    picked.set(Calendar.HOUR_OF_DAY, h)
+                                    picked.set(Calendar.MINUTE, m)
+                                    picked.set(Calendar.SECOND, 0)
+                                    picked.set(Calendar.MILLISECOND, 0)
+                                    selectedTime = picked.timeInMillis
+                                },
+                                cal.get(Calendar.HOUR_OF_DAY),
+                                cal.get(Calendar.MINUTE),
+                                false
+                            ).show()
+                        }
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (selectedTime != null) timeFormat.format(Date(selectedTime!!))
+                        else "Pick a time",
+                        style = MaterialTheme.typography.body1,
+                        color = if (selectedTime != null)
+                            MaterialTheme.colors.onSurface
+                        else
+                            MaterialTheme.colors.onSurface.copy(alpha = 0.4f)
+                    )
+                }
+
+                if (onMovePlanned != null) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Move to Planned",
+                        style = MaterialTheme.typography.body2,
+                        color = MaterialTheme.colors.primary,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier
+                            .clickable {
+                                onMovePlanned()
+                                onDismiss()
+                            }
+                            .padding(vertical = 6.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // Save and Cancel buttons
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = "Cancel",
+                        style = MaterialTheme.typography.button,
+                        color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
+                        modifier = Modifier
+                            .clickable { onDismiss() }
+                            .padding(horizontal = 16.dp, vertical = 10.dp)
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    Text(
+                        text = "Save",
+                        style = MaterialTheme.typography.button,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colors.primary,
+                        modifier = Modifier
+                            .clickable {
+                                onSave(taskName, description, subtasks, selectedDate, selectedTime)
+                                onDismiss()
+                            }
+                            .background(
+                                MaterialTheme.colors.primary.copy(alpha = 0.1f),
+                                RoundedCornerShape(10.dp)
+                            )
+                            .padding(horizontal = 20.dp, vertical = 10.dp)
+                    )
+                }
+            }
         }
     }
 }
