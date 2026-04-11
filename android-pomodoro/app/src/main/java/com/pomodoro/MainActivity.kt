@@ -1,6 +1,7 @@
 package com.pomodoro
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -28,11 +29,24 @@ class MainActivity : ComponentActivity() {
         setContent {
             PomodoroApp()
         }
+        handleAdvanceIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleAdvanceIntent(intent)
     }
 
     override fun onResume() {
         super.onResume()
         timerViewModel.syncFromDeadline()
+    }
+
+    private fun handleAdvanceIntent(intent: Intent?) {
+        if (intent?.action != NotificationHelper.ACTION_ADVANCE_FROM_NOTIFICATION) return
+        timerViewModel.advanceFromNotification(this)
+        intent.action = null
     }
 
     private fun requestNotificationPermission() {

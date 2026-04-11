@@ -256,17 +256,7 @@ fun MainScreen(viewModel: TimerViewModel = viewModel()) {
                 Spacer(modifier = Modifier.width(24.dp))
 
                 IconButton(
-                    onClick = {
-                        if (viewModel.isRoutineActive()) {
-                            viewModel.advanceRoutine(ctx)
-                        } else {
-                            when (state.mode) {
-                                TimerMode.FOCUS -> viewModel.startReview(ctx)
-                                TimerMode.REVIEW -> viewModel.startBreak(ctx)
-                                TimerMode.BREAK -> viewModel.startFocus(ctx)
-                            }
-                        }
-                    },
+                    onClick = { viewModel.advanceToNext(ctx) },
                     modifier = Modifier
                         .size(56.dp)
                         .clip(CircleShape)

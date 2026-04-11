@@ -46,6 +46,7 @@ class TimerForegroundService : Service() {
         }
 
         fun stop(ctx: Context) {
+            if (!isServiceRunning) return
             val intent = Intent(ctx, TimerForegroundService::class.java).apply {
                 action = ACTION_STOP
             }

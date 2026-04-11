@@ -20,7 +20,13 @@ import androidx.compose.material.icons.filled.Notes
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.livedata.observeAsState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -49,6 +55,21 @@ fun PomodoroNavHost(modifier: Modifier = Modifier) {
     val navController = rememberNavController()
     val viewModel: TimerViewModel = viewModel()
     val ctx = LocalContext.current
+
+    val navigateHomeEvent by viewModel.navigateHomeEvent.observeAsState()
+    var lastHandledNavEvent by rememberSaveable { mutableStateOf(0L) }
+    LaunchedEffect(navigateHomeEvent) {
+        val evt = navigateHomeEvent ?: return@LaunchedEffect
+        if (evt <= lastHandledNavEvent) return@LaunchedEffect
+        lastHandledNavEvent = evt
+        navController.navigate(Tab.Home.route) {
+            popUpTo(navController.graph.findStartDestination().id) {
+                saveState = true
+            }
+            launchSingleTop = true
+            restoreState = true
+        }
+    }
 
     Scaffold(
         modifier = modifier.statusBarsPadding(),
