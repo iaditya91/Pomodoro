@@ -562,6 +562,28 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         _todoTasks.postValue(existing + TodoTask(text = text.trim()))
     }
 
+    fun addTodoTaskAtSlot(text: String, slotMillis: Long) {
+        if (text.isBlank()) return
+        val existing = _todoTasks.value ?: emptyList()
+        val cal = Calendar.getInstance().apply { timeInMillis = slotMillis }
+        val today = Calendar.getInstance()
+        val isToday = cal.get(Calendar.YEAR) == today.get(Calendar.YEAR) &&
+            cal.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR)
+        val dateOnly = Calendar.getInstance().apply {
+            timeInMillis = slotMillis
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        _todoTasks.postValue(existing + TodoTask(
+            text = text.trim(),
+            section = if (isToday) TodoSection.TODAY else TodoSection.PLANNED,
+            scheduledDate = dateOnly,
+            scheduledTime = slotMillis
+        ))
+    }
+
     fun removeTodoTask(id: Long) {
         val existing = _todoTasks.value ?: return
         _todoTasks.postValue(existing.filter { it.id != id })

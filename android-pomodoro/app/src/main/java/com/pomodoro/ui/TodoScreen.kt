@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -32,6 +33,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
@@ -72,6 +74,7 @@ fun TodoScreen(
     var todayExpanded by rememberSaveable { mutableStateOf(true) }
     var plannedExpanded by rememberSaveable { mutableStateOf(true) }
     var editingTask by remember { mutableStateOf<TodoTask?>(null) }
+    var showTimebox by rememberSaveable { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -82,22 +85,46 @@ fun TodoScreen(
     ) {
         Spacer(modifier = Modifier.height(24.dp))
 
-        Text(
-            text = "Todo",
-            style = MaterialTheme.typography.h5,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colors.onBackground,
-            modifier = Modifier.padding(horizontal = 8.dp)
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Todo",
+                    style = MaterialTheme.typography.h5,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colors.onBackground,
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                )
 
-        Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(4.dp))
 
-        Text(
-            text = "${tasks.size} task${if (tasks.size != 1) "s" else ""}",
-            style = MaterialTheme.typography.body2,
-            color = MaterialTheme.colors.onBackground.copy(alpha = 0.5f),
-            modifier = Modifier.padding(horizontal = 8.dp)
-        )
+                Text(
+                    text = "${tasks.size} task${if (tasks.size != 1) "s" else ""}",
+                    style = MaterialTheme.typography.body2,
+                    color = MaterialTheme.colors.onBackground.copy(alpha = 0.5f),
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                )
+            }
+
+            IconButton(
+                onClick = { showTimebox = true },
+                modifier = Modifier
+                    .size(44.dp)
+                    .background(
+                        MaterialTheme.colors.primary.copy(alpha = 0.12f),
+                        RoundedCornerShape(12.dp)
+                    )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Schedule,
+                    contentDescription = "Open timebox",
+                    tint = MaterialTheme.colors.primary,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+        }
 
         Spacer(modifier = Modifier.height(20.dp))
 
@@ -266,6 +293,17 @@ fun TodoScreen(
             onMovePlanned = if (task.section == TodoSection.TODAY) {
                 { viewModel.moveTodoToPlanned(task.id) }
             } else null
+        )
+    }
+
+    if (showTimebox) {
+        TimeboxDialog(
+            tasks = tasks,
+            onDismiss = { showTimebox = false },
+            onAddAtSlot = { text, slotMillis ->
+                viewModel.addTodoTaskAtSlot(text, slotMillis)
+            },
+            onEditTask = { task -> editingTask = task }
         )
     }
 }
@@ -912,6 +950,314 @@ private fun TaskDetailDialog(
                             .clickable {
                                 onSave(taskName, description, subtasks, selectedDate, selectedTime)
                                 onDismiss()
+                            }
+                            .background(
+                                MaterialTheme.colors.primary.copy(alpha = 0.1f),
+                                RoundedCornerShape(10.dp)
+                            )
+                            .padding(horizontal = 20.dp, vertical = 10.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TimeboxDialog(
+    tasks: List<TodoTask>,
+    onDismiss: () -> Unit,
+    onAddAtSlot: (text: String, slotMillis: Long) -> Unit,
+    onEditTask: (TodoTask) -> Unit
+) {
+    val hourLabelFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
+    val dateFormat = SimpleDateFormat("EEE, MMM d", Locale.getDefault())
+
+    val todayStart = remember {
+        Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+    }
+    val now = System.currentTimeMillis()
+    val currentHourIndex = ((now - todayStart) / (60L * 60L * 1000L)).toInt().coerceIn(0, 23)
+
+    // Bucket tasks into 24 hourly slots for today.
+    val slotTasks: List<List<TodoTask>> = remember(tasks, todayStart) {
+        val buckets = Array(24) { mutableListOf<TodoTask>() }
+        tasks.forEach { task ->
+            val time = task.scheduledTime ?: return@forEach
+            val taskCal = Calendar.getInstance().apply { timeInMillis = time }
+            // Match slot if scheduledDate is today, or (no date set and section==TODAY).
+            val dateMatchesToday = task.scheduledDate?.let {
+                val d = Calendar.getInstance().apply { timeInMillis = it }
+                val t = Calendar.getInstance().apply { timeInMillis = todayStart }
+                d.get(Calendar.YEAR) == t.get(Calendar.YEAR) &&
+                    d.get(Calendar.DAY_OF_YEAR) == t.get(Calendar.DAY_OF_YEAR)
+            } ?: (task.section == TodoSection.TODAY)
+            if (!dateMatchesToday) return@forEach
+            val hour = taskCal.get(Calendar.HOUR_OF_DAY)
+            buckets[hour].add(task)
+        }
+        buckets.map { it.toList() }
+    }
+
+    var addingForHour by remember { mutableStateOf<Int?>(null) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            shape = RoundedCornerShape(20.dp),
+            backgroundColor = MaterialTheme.colors.surface,
+            elevation = 8.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 600.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Timebox",
+                            style = MaterialTheme.typography.h6,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colors.onSurface
+                        )
+                        Text(
+                            text = dateFormat.format(Date(todayStart)),
+                            style = MaterialTheme.typography.caption,
+                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.55f)
+                        )
+                    }
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close timebox",
+                            tint = MaterialTheme.colors.onSurface.copy(alpha = 0.55f),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    for (hour in 0..23) {
+                        val slotMillis = todayStart + hour * 60L * 60L * 1000L
+                        val items = slotTasks[hour]
+                        val isCurrentHour = hour == currentHourIndex
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            // Left: time label
+                            Text(
+                                text = hourLabelFormat.format(Date(slotMillis)),
+                                style = MaterialTheme.typography.caption,
+                                fontWeight = if (isCurrentHour) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isCurrentHour)
+                                    MaterialTheme.colors.primary
+                                else
+                                    MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
+                                modifier = Modifier
+                                    .width(72.dp)
+                                    .padding(top = 12.dp)
+                            )
+
+                            // Right: slot content
+                            if (items.isEmpty()) {
+                                Row(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .heightIn(min = 44.dp)
+                                        .background(
+                                            MaterialTheme.colors.background,
+                                            RoundedCornerShape(10.dp)
+                                        )
+                                        .clickable { addingForHour = hour }
+                                        .padding(horizontal = 12.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = "Add task at this hour",
+                                        tint = MaterialTheme.colors.onSurface.copy(alpha = 0.35f),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Add task",
+                                        style = MaterialTheme.typography.body2,
+                                        color = MaterialTheme.colors.onSurface.copy(alpha = 0.4f)
+                                    )
+                                }
+                            } else {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    items.forEach { task ->
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(bottom = 4.dp)
+                                                .background(
+                                                    MaterialTheme.colors.primary.copy(alpha = 0.12f),
+                                                    RoundedCornerShape(10.dp)
+                                                )
+                                                .clickable {
+                                                    onEditTask(task)
+                                                    onDismiss()
+                                                }
+                                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = task.text,
+                                                style = MaterialTheme.typography.body2.copy(
+                                                    textDecoration = if (task.isDone) TextDecoration.LineThrough else TextDecoration.None
+                                                ),
+                                                fontWeight = FontWeight.Medium,
+                                                color = if (task.isDone)
+                                                    MaterialTheme.colors.onSurface.copy(alpha = 0.45f)
+                                                else
+                                                    MaterialTheme.colors.onSurface,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            Text(
+                                                text = hourLabelFormat.format(Date(task.scheduledTime ?: slotMillis)),
+                                                style = MaterialTheme.typography.caption,
+                                                color = MaterialTheme.colors.primary
+                                            )
+                                        }
+                                    }
+                                    // Allow adding another task in the same hour
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { addingForHour = hour }
+                                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Add,
+                                            contentDescription = "Add another task at this hour",
+                                            tint = MaterialTheme.colors.onSurface.copy(alpha = 0.35f),
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "Add another",
+                                            style = MaterialTheme.typography.caption,
+                                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.45f)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    addingForHour?.let { hour ->
+        val slotMillis = todayStart + hour * 60L * 60L * 1000L
+        AddSlotTaskDialog(
+            slotLabel = hourLabelFormat.format(Date(slotMillis)),
+            onDismiss = { addingForHour = null },
+            onConfirm = { text ->
+                onAddAtSlot(text, slotMillis)
+                addingForHour = null
+            }
+        )
+    }
+}
+
+@Composable
+private fun AddSlotTaskDialog(
+    slotLabel: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var text by remember { mutableStateOf("") }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            shape = RoundedCornerShape(20.dp),
+            backgroundColor = MaterialTheme.colors.surface,
+            elevation = 8.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                Text(
+                    text = "New task at $slotLabel",
+                    style = MaterialTheme.typography.subtitle1,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colors.onSurface
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    placeholder = {
+                        Text(
+                            "Task name",
+                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.4f)
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = TextFieldDefaults.outlinedTextFieldColors(
+                        backgroundColor = MaterialTheme.colors.background,
+                        focusedBorderColor = MaterialTheme.colors.primary,
+                        unfocusedBorderColor = MaterialTheme.colors.onSurface.copy(alpha = 0.15f),
+                        cursorColor = MaterialTheme.colors.primary,
+                        textColor = MaterialTheme.colors.onSurface
+                    ),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Sentences,
+                        imeAction = ImeAction.Done
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onDone = {
+                            if (text.isNotBlank()) onConfirm(text.trim())
+                        }
+                    )
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = "Cancel",
+                        style = MaterialTheme.typography.button,
+                        color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
+                        modifier = Modifier
+                            .clickable { onDismiss() }
+                            .padding(horizontal = 16.dp, vertical = 10.dp)
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    Text(
+                        text = "Add",
+                        style = MaterialTheme.typography.button,
+                        fontWeight = FontWeight.Bold,
+                        color = if (text.isNotBlank())
+                            MaterialTheme.colors.primary
+                        else
+                            MaterialTheme.colors.primary.copy(alpha = 0.4f),
+                        modifier = Modifier
+                            .clickable(enabled = text.isNotBlank()) {
+                                onConfirm(text.trim())
                             }
                             .background(
                                 MaterialTheme.colors.primary.copy(alpha = 0.1f),
