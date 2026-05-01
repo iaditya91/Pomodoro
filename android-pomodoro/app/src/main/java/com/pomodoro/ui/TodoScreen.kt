@@ -309,6 +309,7 @@ fun TodoScreen(
             onAssignToSlot = { id, slotMillis ->
                 viewModel.assignTodoToSlot(id, slotMillis)
             },
+            onUnschedule = { id -> viewModel.unscheduleTodoTime(id) },
             onEditTask = { task -> editingTask = task }
         )
     }
@@ -975,6 +976,7 @@ private fun TimeboxDialog(
     onDismiss: () -> Unit,
     onAddAtSlot: (text: String, slotMillis: Long) -> Unit,
     onAssignToSlot: (taskId: Long, slotMillis: Long) -> Unit,
+    onUnschedule: (taskId: Long) -> Unit,
     onEditTask: (TodoTask) -> Unit
 ) {
     val hourLabelFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
@@ -1122,30 +1124,48 @@ private fun TimeboxDialog(
                                                     MaterialTheme.colors.primary.copy(alpha = 0.12f),
                                                     RoundedCornerShape(10.dp)
                                                 )
-                                                .clickable {
-                                                    onEditTask(task)
-                                                    onDismiss()
-                                                }
-                                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                                                .padding(start = 12.dp, top = 4.dp, bottom = 4.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text(
-                                                text = task.text,
-                                                style = MaterialTheme.typography.body2.copy(
-                                                    textDecoration = if (task.isDone) TextDecoration.LineThrough else TextDecoration.None
-                                                ),
-                                                fontWeight = FontWeight.Medium,
-                                                color = if (task.isDone)
-                                                    MaterialTheme.colors.onSurface.copy(alpha = 0.45f)
-                                                else
-                                                    MaterialTheme.colors.onSurface,
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                            Text(
-                                                text = hourLabelFormat.format(Date(task.scheduledTime ?: slotMillis)),
-                                                style = MaterialTheme.typography.caption,
-                                                color = MaterialTheme.colors.primary
-                                            )
+                                            Row(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .clickable {
+                                                        onEditTask(task)
+                                                        onDismiss()
+                                                    }
+                                                    .padding(vertical = 6.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = task.text,
+                                                    style = MaterialTheme.typography.body2.copy(
+                                                        textDecoration = if (task.isDone) TextDecoration.LineThrough else TextDecoration.None
+                                                    ),
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = if (task.isDone)
+                                                        MaterialTheme.colors.onSurface.copy(alpha = 0.45f)
+                                                    else
+                                                        MaterialTheme.colors.onSurface,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                Text(
+                                                    text = hourLabelFormat.format(Date(task.scheduledTime ?: slotMillis)),
+                                                    style = MaterialTheme.typography.caption,
+                                                    color = MaterialTheme.colors.primary
+                                                )
+                                            }
+                                            IconButton(
+                                                onClick = { onUnschedule(task.id) },
+                                                modifier = Modifier.size(32.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Close,
+                                                    contentDescription = "Untime task",
+                                                    tint = MaterialTheme.colors.onSurface.copy(alpha = 0.5f),
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
                                         }
                                     }
                                     // Allow adding another task in the same hour
