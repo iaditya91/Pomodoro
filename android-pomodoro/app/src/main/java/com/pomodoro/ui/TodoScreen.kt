@@ -5,6 +5,7 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -21,6 +22,8 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.Card
+import androidx.compose.material.DropdownMenu
+import androidx.compose.material.DropdownMenuItem
 import androidx.compose.material.Icon
 import androidx.compose.material.IconButton
 import androidx.compose.material.MaterialTheme
@@ -302,6 +305,9 @@ fun TodoScreen(
             onDismiss = { showTimebox = false },
             onAddAtSlot = { text, slotMillis ->
                 viewModel.addTodoTaskAtSlot(text, slotMillis)
+            },
+            onAssignToSlot = { id, slotMillis ->
+                viewModel.assignTodoToSlot(id, slotMillis)
             },
             onEditTask = { task -> editingTask = task }
         )
@@ -968,6 +974,7 @@ private fun TimeboxDialog(
     tasks: List<TodoTask>,
     onDismiss: () -> Unit,
     onAddAtSlot: (text: String, slotMillis: Long) -> Unit,
+    onAssignToSlot: (taskId: Long, slotMillis: Long) -> Unit,
     onEditTask: (TodoTask) -> Unit
 ) {
     val hourLabelFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
@@ -1173,11 +1180,20 @@ private fun TimeboxDialog(
 
     addingForHour?.let { hour ->
         val slotMillis = todayStart + hour * 60L * 60L * 1000L
+        val untimedTasks = tasks.filter {
+            it.scheduledTime == null && !it.isDone &&
+                (it.section == TodoSection.TODAY || it.section == TodoSection.PLANNED)
+        }
         AddSlotTaskDialog(
             slotLabel = hourLabelFormat.format(Date(slotMillis)),
+            untimedTasks = untimedTasks,
             onDismiss = { addingForHour = null },
             onConfirm = { text ->
                 onAddAtSlot(text, slotMillis)
+                addingForHour = null
+            },
+            onPickExisting = { taskId ->
+                onAssignToSlot(taskId, slotMillis)
                 addingForHour = null
             }
         )
@@ -1187,10 +1203,13 @@ private fun TimeboxDialog(
 @Composable
 private fun AddSlotTaskDialog(
     slotLabel: String,
+    untimedTasks: List<TodoTask>,
     onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit
+    onConfirm: (String) -> Unit,
+    onPickExisting: (Long) -> Unit
 ) {
     var text by remember { mutableStateOf("") }
+    var dropdownExpanded by remember { mutableStateOf(false) }
 
     Dialog(onDismissRequest = onDismiss) {
         Card(
@@ -1207,6 +1226,77 @@ private fun AddSlotTaskDialog(
                     color = MaterialTheme.colors.onSurface
                 )
                 Spacer(modifier = Modifier.height(12.dp))
+
+                if (untimedTasks.isNotEmpty()) {
+                    Text(
+                        text = "Pick existing task",
+                        style = MaterialTheme.typography.caption,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    MaterialTheme.colors.background,
+                                    RoundedCornerShape(12.dp)
+                                )
+                                .clickable { dropdownExpanded = true }
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Choose from ${untimedTasks.size} untimed task${if (untimedTasks.size != 1) "s" else ""}",
+                                style = MaterialTheme.typography.body2,
+                                color = MaterialTheme.colors.onSurface.copy(alpha = 0.7f),
+                                modifier = Modifier.weight(1f)
+                            )
+                            Icon(
+                                imageVector = Icons.Default.KeyboardArrowDown,
+                                contentDescription = "Show existing tasks",
+                                tint = MaterialTheme.colors.onSurface.copy(alpha = 0.5f),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = dropdownExpanded,
+                            onDismissRequest = { dropdownExpanded = false },
+                            modifier = Modifier.heightIn(max = 280.dp)
+                        ) {
+                            untimedTasks.forEach { existing ->
+                                DropdownMenuItem(onClick = {
+                                    dropdownExpanded = false
+                                    onPickExisting(existing.id)
+                                }) {
+                                    Column {
+                                        Text(
+                                            text = existing.text,
+                                            style = MaterialTheme.typography.body2,
+                                            color = MaterialTheme.colors.onSurface,
+                                            maxLines = 1
+                                        )
+                                        Text(
+                                            text = if (existing.section == TodoSection.TODAY) "Today" else "Planned",
+                                            style = MaterialTheme.typography.caption,
+                                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.5f)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Or create new",
+                        style = MaterialTheme.typography.caption,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it },
