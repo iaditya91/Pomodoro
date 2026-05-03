@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -289,8 +290,8 @@ fun TodoScreen(
             task = task,
             isToday = task.section == TodoSection.TODAY,
             onDismiss = { editingTask = null },
-            onSave = { name, desc, subtasks, date, time ->
-                viewModel.updateTodoTask(task.id, name, desc, subtasks, date, time)
+            onSave = { name, desc, subtasks, date, time, isRepeatable ->
+                viewModel.updateTodoTask(task.id, name, desc, subtasks, date, time, isRepeatable)
                 editingTask = null
             },
             onMovePlanned = if (task.section == TodoSection.TODAY) {
@@ -461,7 +462,7 @@ private fun TodayTaskCard(
             }
 
             // Show description, subtask count, and time if set
-            if (task.description.isNotBlank() || task.scheduledTime != null || task.subtasks.isNotEmpty()) {
+            if (task.description.isNotBlank() || task.scheduledTime != null || task.subtasks.isNotEmpty() || task.isRepeatable) {
                 Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 4.dp)) {
                     if (task.description.isNotBlank()) {
                         Text(
@@ -480,13 +481,34 @@ private fun TodayTaskCard(
                             modifier = Modifier.padding(top = 2.dp)
                         )
                     }
-                    if (task.scheduledTime != null) {
-                        Text(
-                            text = timeFormat.format(Date(task.scheduledTime)),
-                            style = MaterialTheme.typography.caption,
-                            color = MaterialTheme.colors.primary.copy(alpha = 0.8f),
-                            modifier = Modifier.padding(top = 2.dp)
-                        )
+                    Row(
+                        modifier = Modifier.padding(top = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (task.scheduledTime != null) {
+                            Text(
+                                text = timeFormat.format(Date(task.scheduledTime)),
+                                style = MaterialTheme.typography.caption,
+                                color = MaterialTheme.colors.primary.copy(alpha = 0.8f)
+                            )
+                        }
+                        if (task.isRepeatable) {
+                            if (task.scheduledTime != null) {
+                                Spacer(modifier = Modifier.width(8.dp))
+                            }
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Repeats daily",
+                                tint = MaterialTheme.colors.primary.copy(alpha = 0.8f),
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Daily",
+                                style = MaterialTheme.typography.caption,
+                                color = MaterialTheme.colors.primary.copy(alpha = 0.8f)
+                            )
+                        }
                     }
                 }
             }
@@ -566,7 +588,7 @@ private fun PlannedTaskCard(
             }
 
             // Show description, subtask count, and scheduled info if set
-            if (task.description.isNotBlank() || task.subtasks.isNotEmpty() || task.scheduledDate != null || task.scheduledTime != null) {
+            if (task.description.isNotBlank() || task.subtasks.isNotEmpty() || task.scheduledDate != null || task.scheduledTime != null || task.isRepeatable) {
                 Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 4.dp)) {
                     if (task.description.isNotBlank()) {
                         Text(
@@ -592,13 +614,34 @@ private fun PlannedTaskCard(
                             append(timeFormat.format(Date(task.scheduledTime)))
                         }
                     }
-                    if (scheduleInfo.isNotEmpty()) {
-                        Text(
-                            text = scheduleInfo,
-                            style = MaterialTheme.typography.caption,
-                            color = MaterialTheme.colors.primary.copy(alpha = 0.8f),
-                            modifier = Modifier.padding(top = 2.dp)
-                        )
+                    Row(
+                        modifier = Modifier.padding(top = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (scheduleInfo.isNotEmpty()) {
+                            Text(
+                                text = scheduleInfo,
+                                style = MaterialTheme.typography.caption,
+                                color = MaterialTheme.colors.primary.copy(alpha = 0.8f)
+                            )
+                        }
+                        if (task.isRepeatable) {
+                            if (scheduleInfo.isNotEmpty()) {
+                                Spacer(modifier = Modifier.width(8.dp))
+                            }
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Repeats daily",
+                                tint = MaterialTheme.colors.primary.copy(alpha = 0.8f),
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Daily",
+                                style = MaterialTheme.typography.caption,
+                                color = MaterialTheme.colors.primary.copy(alpha = 0.8f)
+                            )
+                        }
                     }
                 }
             }
@@ -622,7 +665,7 @@ private fun TaskDetailDialog(
     task: TodoTask,
     isToday: Boolean,
     onDismiss: () -> Unit,
-    onSave: (name: String, description: String, subtasks: List<TodoSubtask>, date: Long?, time: Long?) -> Unit,
+    onSave: (name: String, description: String, subtasks: List<TodoSubtask>, date: Long?, time: Long?, isRepeatable: Boolean) -> Unit,
     onMovePlanned: (() -> Unit)? = null
 ) {
     val ctx = LocalContext.current
@@ -632,6 +675,7 @@ private fun TaskDetailDialog(
     var newSubtaskText by remember { mutableStateOf("") }
     var selectedDate by remember { mutableStateOf(task.scheduledDate) }
     var selectedTime by remember { mutableStateOf(task.scheduledTime) }
+    var isRepeatable by remember { mutableStateOf(task.isRepeatable) }
 
     val dateFormat = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
     val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
@@ -709,6 +753,63 @@ private fun TaskDetailDialog(
                         capitalization = KeyboardCapitalization.Sentences
                     )
                 )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Repeatable toggle
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            if (isRepeatable)
+                                MaterialTheme.colors.primary.copy(alpha = 0.1f)
+                            else
+                                MaterialTheme.colors.background,
+                            RoundedCornerShape(12.dp)
+                        )
+                        .clickable { isRepeatable = !isRepeatable }
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Repeat daily",
+                        tint = if (isRepeatable)
+                            MaterialTheme.colors.primary
+                        else
+                            MaterialTheme.colors.onSurface.copy(alpha = 0.5f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Repeat daily",
+                            style = MaterialTheme.typography.body1,
+                            fontWeight = FontWeight.Medium,
+                            color = if (isRepeatable)
+                                MaterialTheme.colors.primary
+                            else
+                                MaterialTheme.colors.onSurface
+                        )
+                        Text(
+                            text = if (isRepeatable)
+                                "Resets each day, time stays the same"
+                            else
+                                "Tap to repeat every day",
+                            style = MaterialTheme.typography.caption,
+                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.5f)
+                        )
+                    }
+                    Text(
+                        text = if (isRepeatable) "ON" else "OFF",
+                        style = MaterialTheme.typography.caption,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isRepeatable)
+                            MaterialTheme.colors.primary
+                        else
+                            MaterialTheme.colors.onSurface.copy(alpha = 0.4f)
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
@@ -955,7 +1056,7 @@ private fun TaskDetailDialog(
                         color = MaterialTheme.colors.primary,
                         modifier = Modifier
                             .clickable {
-                                onSave(taskName, description, subtasks, selectedDate, selectedTime)
+                                onSave(taskName, description, subtasks, selectedDate, selectedTime, isRepeatable)
                                 onDismiss()
                             }
                             .background(

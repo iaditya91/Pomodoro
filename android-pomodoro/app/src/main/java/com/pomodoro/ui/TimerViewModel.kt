@@ -66,7 +66,8 @@ data class TodoTask(
     val description: String = "",
     val subtasks: List<TodoSubtask> = emptyList(),
     val scheduledDate: Long? = null,
-    val scheduledTime: Long? = null
+    val scheduledTime: Long? = null,
+    val isRepeatable: Boolean = false
 )
 
 data class RoutineSubtask(
@@ -643,12 +644,39 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun promoteScheduledTasks() {
         val tasks = _todoTasks.value ?: return
-        val today = Calendar.getInstance()
-        val todayYear = today.get(Calendar.YEAR)
-        val todayDay = today.get(Calendar.DAY_OF_YEAR)
+        val todayCal = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val todayMillis = todayCal.timeInMillis
+        val todayYear = todayCal.get(Calendar.YEAR)
+        val todayDay = todayCal.get(Calendar.DAY_OF_YEAR)
 
         val updated = tasks.map { task ->
-            if (task.section == TodoSection.PLANNED && task.scheduledDate != null) {
+            if (task.isRepeatable) {
+                val isAlreadyToday = task.scheduledDate?.let { d ->
+                    val c = Calendar.getInstance().apply { timeInMillis = d }
+                    c.get(Calendar.YEAR) == todayYear && c.get(Calendar.DAY_OF_YEAR) == todayDay
+                } ?: false
+                if (!isAlreadyToday) {
+                    val newScheduledTime = task.scheduledTime?.let { t ->
+                        val tc = Calendar.getInstance().apply { timeInMillis = t }
+                        Calendar.getInstance().apply {
+                            timeInMillis = todayMillis
+                            set(Calendar.HOUR_OF_DAY, tc.get(Calendar.HOUR_OF_DAY))
+                            set(Calendar.MINUTE, tc.get(Calendar.MINUTE))
+                        }.timeInMillis
+                    }
+                    task.copy(
+                        section = TodoSection.TODAY,
+                        isDone = false,
+                        scheduledDate = todayMillis,
+                        scheduledTime = newScheduledTime
+                    )
+                } else task
+            } else if (task.section == TodoSection.PLANNED && task.scheduledDate != null) {
                 val taskCal = Calendar.getInstance().apply { timeInMillis = task.scheduledDate }
                 if (taskCal.get(Calendar.YEAR) == todayYear && taskCal.get(Calendar.DAY_OF_YEAR) == todayDay) {
                     task.copy(section = TodoSection.TODAY)
@@ -658,11 +686,17 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         if (updated != tasks) _todoTasks.value = updated
     }
 
-    fun updateTodoTask(id: Long, name: String, description: String, subtasks: List<TodoSubtask>, scheduledDate: Long?, scheduledTime: Long?) {
+    fun updateTodoTask(id: Long, name: String, description: String, subtasks: List<TodoSubtask>, scheduledDate: Long?, scheduledTime: Long?, isRepeatable: Boolean) {
         val existing = _todoTasks.value ?: return
         val today = Calendar.getInstance()
         val todayYear = today.get(Calendar.YEAR)
         val todayDay = today.get(Calendar.DAY_OF_YEAR)
+        val todayDateOnly = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
 
         _todoTasks.postValue(existing.map {
             if (it.id == id) {
@@ -672,13 +706,17 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
 
                 val newSection = if (isDateToday && it.section == TodoSection.PLANNED) TodoSection.TODAY else it.section
 
+                // Anchor a freshly-marked-repeatable task to today so it isn't reset on its own creation day.
+                val finalDate = if (isRepeatable && scheduledDate == null) todayDateOnly else scheduledDate
+
                 it.copy(
                     text = name.trim().ifBlank { it.text },
                     description = description,
                     subtasks = subtasks.filter { s -> s.text.isNotBlank() },
-                    scheduledDate = scheduledDate,
+                    scheduledDate = finalDate,
                     scheduledTime = scheduledTime,
-                    section = newSection
+                    section = newSection,
+                    isRepeatable = isRepeatable
                 )
             } else it
         })
