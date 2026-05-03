@@ -627,20 +627,9 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
 
     fun moveTodoToPlanned(id: Long) {
         val existing = _todoTasks.value ?: return
-        val today = Calendar.getInstance()
-        val todayYear = today.get(Calendar.YEAR)
-        val todayDay = today.get(Calendar.DAY_OF_YEAR)
         _todoTasks.postValue(existing.map {
             if (it.id == id) {
-                val isDateToday = it.scheduledDate?.let { d ->
-                    val cal = Calendar.getInstance().apply { timeInMillis = d }
-                    cal.get(Calendar.YEAR) == todayYear && cal.get(Calendar.DAY_OF_YEAR) == todayDay
-                } ?: false
-                if (isDateToday) {
-                    it.copy(section = TodoSection.PLANNED, scheduledDate = null, scheduledTime = null)
-                } else {
-                    it.copy(section = TodoSection.PLANNED)
-                }
+                it.copy(section = TodoSection.PLANNED, scheduledDate = null, scheduledTime = null)
             } else it
         })
     }
