@@ -7,6 +7,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.pomodoro.ui.CheckItemMode
+import com.pomodoro.ui.JournalEntry
 import com.pomodoro.ui.SettingsPrefs
 import com.pomodoro.ui.SavedReviewNote
 import com.pomodoro.ui.TodoTask
@@ -26,6 +27,7 @@ class AutoBackupWorker(
         val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val notesJson = prefs.getString(KEY_SAVED_NOTES, null)
         val todosJson = prefs.getString(KEY_TODO_TASKS, null)
+        val journalJson = prefs.getString(KEY_JOURNAL_ENTRIES, null)
 
         val gson = Gson()
         val notes: List<SavedReviewNote> = if (notesJson != null) {
@@ -39,6 +41,13 @@ class AutoBackupWorker(
             try {
                 val type = object : TypeToken<List<TodoTask>>() {}.type
                 gson.fromJson(todosJson, type)
+            } catch (_: Exception) { emptyList() }
+        } else emptyList()
+
+        val journalEntries: List<JournalEntry> = if (journalJson != null) {
+            try {
+                val type = object : TypeToken<List<JournalEntry>>() {}.type
+                gson.fromJson(journalJson, type)
             } catch (_: Exception) { emptyList() }
         } else emptyList()
 
@@ -56,7 +65,7 @@ class AutoBackupWorker(
             focusChecklist = checklistItems.map { BackupChecklistItem(text = it) }
         )
 
-        val result = DriveBackupHelper.backup(ctx, notes, todos, settings)
+        val result = DriveBackupHelper.backup(ctx, notes, todos, journalEntries, settings)
         return if (result.isSuccess) Result.success() else Result.retry()
     }
 
@@ -65,6 +74,7 @@ class AutoBackupWorker(
         private const val PREFS_NAME = "pomodoro_prefs"
         private const val KEY_SAVED_NOTES = "saved_notes"
         private const val KEY_TODO_TASKS = "todo_tasks"
+        private const val KEY_JOURNAL_ENTRIES = "journal_entries"
         private const val KEY_AUTO_BACKUP = "auto_backup_enabled"
 
         fun isEnabled(ctx: Context): Boolean {

@@ -16,6 +16,7 @@ import com.google.api.services.drive.DriveScopes
 import com.google.api.services.drive.model.File as DriveFile
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import com.pomodoro.ui.JournalEntry
 import com.pomodoro.ui.ReviewItem
 import com.pomodoro.ui.SavedReviewNote
 import com.pomodoro.ui.TodoTask
@@ -39,6 +40,7 @@ data class BackupChecklistItem(
 data class BackupPayload(
     val notes: List<SavedReviewNote> = emptyList(),
     val todoTasks: List<TodoTask> = emptyList(),
+    val journalEntries: List<JournalEntry> = emptyList(),
     val settings: BackupSettings? = null
 )
 
@@ -92,13 +94,13 @@ object DriveBackupHelper {
             .build()
     }
 
-    suspend fun backup(ctx: Context, notes: List<SavedReviewNote>, todoTasks: List<TodoTask> = emptyList(), settings: BackupSettings? = null): Result<Unit> {
+    suspend fun backup(ctx: Context, notes: List<SavedReviewNote>, todoTasks: List<TodoTask> = emptyList(), journalEntries: List<JournalEntry> = emptyList(), settings: BackupSettings? = null): Result<Unit> {
         return withContext(Dispatchers.IO) {
             try {
                 val drive = getDriveService(ctx) ?: return@withContext Result.failure(
                     Exception("Not signed in")
                 )
-                val payload = BackupPayload(notes = notes, todoTasks = todoTasks, settings = settings)
+                val payload = BackupPayload(notes = notes, todoTasks = todoTasks, journalEntries = journalEntries, settings = settings)
                 val json = Gson().toJson(payload)
                 val content = ByteArrayContent.fromString(BACKUP_MIME, json)
 

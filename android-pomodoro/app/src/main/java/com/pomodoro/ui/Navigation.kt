@@ -14,6 +14,7 @@ import androidx.compose.material.Icon
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Scaffold
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Notes
@@ -44,11 +45,12 @@ sealed class Tab(val route: String, val label: String, val icon: ImageVector) {
     object Home : Tab("home", "Home", Icons.Default.Home)
     object Todo : Tab("todo", "Todo", Icons.Default.CheckCircle)
     object Routines : Tab("routines", "Routines", Icons.Default.Repeat)
+    object Journal : Tab("journal", "Journal", Icons.Default.CalendarMonth)
     object Notes : Tab("notes", "Notes", Icons.Default.Notes)
     object Settings : Tab("settings", "Settings", Icons.Default.Settings)
 }
 
-private val tabs = listOf(Tab.Home, Tab.Todo, Tab.Routines, Tab.Notes, Tab.Settings)
+private val tabs = listOf(Tab.Home, Tab.Todo, Tab.Routines, Tab.Journal, Tab.Notes, Tab.Settings)
 
 @Composable
 fun PomodoroNavHost(modifier: Modifier = Modifier) {
@@ -159,6 +161,9 @@ fun PomodoroNavHost(modifier: Modifier = Modifier) {
                         }
                     }
                 )
+            }
+            composable(Tab.Journal.route) {
+                JournalScreen(viewModel = viewModel)
             }
             composable(Tab.Notes.route) {
                 NotesScreen(viewModel = viewModel)

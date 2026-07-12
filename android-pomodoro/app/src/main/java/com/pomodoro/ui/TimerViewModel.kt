@@ -50,6 +50,18 @@ data class SavedReviewNote(
     val timestamp: Long = System.currentTimeMillis()
 )
 
+/**
+ * A single completed focus session recorded in the Journal.
+ * The task name is written when the focus timer ends; [improvements]
+ * are attached afterwards (as subpoints) if the review timer produced any.
+ */
+data class JournalEntry(
+    val id: Long = System.nanoTime(),
+    val taskName: String = "",
+    val improvements: List<ReviewItem> = emptyList(),
+    val timestamp: Long = System.currentTimeMillis()
+)
+
 enum class TodoSection { TODAY, PLANNED }
 
 data class TodoSubtask(
@@ -128,6 +140,13 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
     private val _savedNotes = MutableLiveData<List<SavedReviewNote>>(emptyList())
     val savedNotes: LiveData<List<SavedReviewNote>> = _savedNotes
 
+    private val _journalEntries = MutableLiveData<List<JournalEntry>>(emptyList())
+    val journalEntries: LiveData<List<JournalEntry>> = _journalEntries
+
+    // Id of the journal entry created for the focus session currently in progress,
+    // so its improvements can be attached once the review is saved.
+    private var currentJournalEntryId: Long? = null
+
     private val _routines = MutableLiveData<List<Routine>>(emptyList())
     val routines: LiveData<List<Routine>> = _routines
 
@@ -155,6 +174,7 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         loadPersistedData()
         promoteScheduledTasks()
         _savedNotes.observeForever { persistNotes(it) }
+        _journalEntries.observeForever { persistJournal(it) }
         _todoTasks.observeForever { persistTodos(it) }
         _routines.observeForever { persistRoutines(it) }
     }
@@ -164,6 +184,12 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val type = object : TypeToken<List<SavedReviewNote>>() {}.type
                 _savedNotes.value = gson.fromJson(json, type)
+            } catch (_: Exception) {}
+        }
+        prefs.getString("journal_entries", null)?.let { json ->
+            try {
+                val type = object : TypeToken<List<JournalEntry>>() {}.type
+                _journalEntries.value = gson.fromJson(json, type)
             } catch (_: Exception) {}
         }
         prefs.getString("todo_tasks", null)?.let { json ->
@@ -182,6 +208,10 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun persistNotes(notes: List<SavedReviewNote>) {
         prefs.edit().putString("saved_notes", gson.toJson(notes)).apply()
+    }
+
+    private fun persistJournal(entries: List<JournalEntry>) {
+        prefs.edit().putString("journal_entries", gson.toJson(entries)).apply()
     }
 
     private fun persistTodos(todos: List<TodoTask>) {
@@ -380,6 +410,9 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
     private fun saveCurrentReview() {
         val cur = _uiState.value ?: return
         val answers = cur.reviewAnswers
+        // Attach any review improvements onto the journal entry created when
+        // the focus timer ended, so they appear as subpoints under the task.
+        attachImprovementsToJournal(answers.improvements)
         if (answers.improvements.isEmpty()) return
         val note = SavedReviewNote(
             taskName = cur.taskName,
@@ -392,6 +425,42 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteNote(id: Long) {
         val existing = _savedNotes.value ?: return
         _savedNotes.postValue(existing.filter { it.id != id })
+    }
+
+    // --- Journal ---
+
+    /**
+     * Records the current focus task in the Journal under today's date.
+     * Called when a focus session ends (transitions out of FOCUS mode).
+     * Entries with a blank task name are skipped.
+     */
+    private fun logFocusToJournal() {
+        val cur = _uiState.value ?: return
+        if (cur.mode != TimerMode.FOCUS) return
+        val name = cur.taskName.trim()
+        if (name.isBlank()) {
+            currentJournalEntryId = null
+            return
+        }
+        val entry = JournalEntry(taskName = name)
+        currentJournalEntryId = entry.id
+        val existing = _journalEntries.value ?: emptyList()
+        _journalEntries.postValue(listOf(entry) + existing)
+    }
+
+    private fun attachImprovementsToJournal(improvements: List<ReviewItem>) {
+        val entryId = currentJournalEntryId ?: return
+        if (improvements.isEmpty()) return
+        val existing = _journalEntries.value ?: return
+        _journalEntries.postValue(existing.map {
+            if (it.id == entryId) it.copy(improvements = it.improvements + improvements) else it
+        })
+    }
+
+    fun deleteJournalEntry(id: Long) {
+        val existing = _journalEntries.value ?: return
+        if (currentJournalEntryId == id) currentJournalEntryId = null
+        _journalEntries.postValue(existing.filter { it.id != id })
     }
 
     // --- Backup / Restore ---
@@ -407,6 +476,7 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
     fun backupToDrive(ctx: Context) {
         val notes = _savedNotes.value ?: emptyList()
         val todos = _todoTasks.value ?: emptyList()
+        val journal = _journalEntries.value ?: emptyList()
         // Gather settings
         val (f, r, b) = SettingsPrefs.loadPrefs(ctx)
         val checklistItems = SettingsPrefs.loadFocusChecklistItems(ctx)
@@ -422,10 +492,10 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         )
         _backupStatus.postValue(BackupStatus.LOADING)
         viewModelScope.launch {
-            val result = DriveBackupHelper.backup(ctx, notes, todos, settings)
+            val result = DriveBackupHelper.backup(ctx, notes, todos, journal, settings)
             if (result.isSuccess) {
                 _backupStatus.postValue(BackupStatus.SUCCESS)
-                _backupMessage.postValue("Backed up ${notes.size} note(s), ${todos.size} task(s), settings")
+                _backupMessage.postValue("Backed up ${notes.size} note(s), ${todos.size} task(s), ${journal.size} journal entr(ies), settings")
             } else {
                 _backupStatus.postValue(BackupStatus.ERROR)
                 _backupMessage.postValue(result.exceptionOrNull()?.message ?: "Backup failed")
@@ -441,6 +511,9 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
                 val payload = result.getOrNull() ?: return@launch
                 _savedNotes.postValue(payload.notes)
                 _todoTasks.postValue(payload.todoTasks)
+                if (payload.journalEntries.isNotEmpty()) {
+                    _journalEntries.postValue(payload.journalEntries)
+                }
                 // Restore settings if present
                 payload.settings?.let { s ->
                     SettingsPrefs.savePrefs(ctx, s.focusMinutes, s.reviewMinutes, s.breakMinutes)
@@ -470,6 +543,7 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
 
     fun startReview(ctx: Context) {
         reloadDurations(ctx)
+        logFocusToJournal()
         cancelTickJob()
         val cur = _uiState.value ?: TimerUiState()
         val millis = minutesToMillis(reviewMinutes)
@@ -793,6 +867,7 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
 
         when (cur.mode) {
             TimerMode.FOCUS -> {
+                logFocusToJournal()
                 if (routine.reviewEnabled) {
                     if (!routine.useDefaultSettings) reviewMinutes = routine.reviewMinutes
                     cancelTickJob()
