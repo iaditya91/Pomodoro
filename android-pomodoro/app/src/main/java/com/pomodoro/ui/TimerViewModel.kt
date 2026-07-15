@@ -54,11 +54,17 @@ data class SavedReviewNote(
  * A single completed focus session recorded in the Journal.
  * The task name is written when the focus timer ends; [improvements]
  * are attached afterwards (as subpoints) if the review timer produced any.
+ *
+ * [startTime] is when the focus session began and [timestamp] is when it ended.
+ * [note] holds any free-text the user adds manually. Entries can also be created
+ * fully by hand from the Journal screen.
  */
 data class JournalEntry(
     val id: Long = System.nanoTime(),
     val taskName: String = "",
     val improvements: List<ReviewItem> = emptyList(),
+    val note: String = "",
+    val startTime: Long = 0L,
     val timestamp: Long = System.currentTimeMillis()
 )
 
@@ -130,6 +136,11 @@ data class TimerUiState(
     val checklistCompleted: Boolean = true
 )
 
+// Keys for the in-flight focus session mirrored to disk (see persistPendingFocus).
+private const val KEY_PENDING_TASK = "pending_focus_task"
+private const val KEY_PENDING_START = "pending_focus_start"
+private const val KEY_PENDING_DEADLINE = "pending_focus_deadline"
+
 class TimerViewModel(application: Application) : AndroidViewModel(application) {
     private val _uiState = MutableLiveData(TimerUiState())
     val uiState: LiveData<TimerUiState> = _uiState
@@ -146,6 +157,15 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
     // Id of the journal entry created for the focus session currently in progress,
     // so its improvements can be attached once the review is saved.
     private var currentJournalEntryId: Long? = null
+
+    // Whether the current focus session has already been written to the Journal.
+    // Guards against double-logging: the session is logged the moment the focus
+    // timer reaches 0 (even in the background), and the later manual-advance calls
+    // become no-ops. Reset to false whenever a new focus session begins.
+    private var focusLogged = false
+
+    // Wall-clock time the current focus session started, recorded in the journal entry.
+    private var currentFocusStartMillis: Long = System.currentTimeMillis()
 
     private val _routines = MutableLiveData<List<Routine>>(emptyList())
     val routines: LiveData<List<Routine>> = _routines
@@ -177,6 +197,8 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         _journalEntries.observeForever { persistJournal(it) }
         _todoTasks.observeForever { persistTodos(it) }
         _routines.observeForever { persistRoutines(it) }
+        // After the observers are attached, so a recovered entry gets persisted too.
+        flushPendingFocusSession()
     }
 
     private fun loadPersistedData() {
@@ -220,6 +242,65 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun persistRoutines(routines: List<Routine>) {
         prefs.edit().putString("routines", gson.toJson(routines)).apply()
+    }
+
+    // --- Pending focus session ---
+    //
+    // The focus session in progress is mirrored to disk so it can still be journaled
+    // if it finishes while we are not around to see it: the app may be backgrounded,
+    // the Activity (and with it the ViewModel and its tick job) may be destroyed, or
+    // the process may be reclaimed once the foreground service stops itself at zero.
+    // [deadline] is 0 while the session is paused/not yet started, so a paused session
+    // is never mistaken for a finished one.
+
+    private fun persistPendingFocus(taskName: String, startMillis: Long, deadline: Long) {
+        prefs.edit()
+            .putString(KEY_PENDING_TASK, taskName)
+            .putLong(KEY_PENDING_START, startMillis)
+            .putLong(KEY_PENDING_DEADLINE, deadline)
+            .apply()
+    }
+
+    private fun clearPendingFocus() {
+        prefs.edit()
+            .remove(KEY_PENDING_TASK)
+            .remove(KEY_PENDING_START)
+            .remove(KEY_PENDING_DEADLINE)
+            .apply()
+    }
+
+    /**
+     * Journals a focus session that ran past its deadline while we weren't watching,
+     * and restores the "focus complete" state so the completion notification still
+     * advances the timer correctly. No-op unless a running focus session is on disk
+     * whose deadline has passed.
+     */
+    private fun flushPendingFocusSession() {
+        val deadline = prefs.getLong(KEY_PENDING_DEADLINE, 0L)
+        if (deadline <= 0L || System.currentTimeMillis() < deadline) return
+        val name = prefs.getString(KEY_PENDING_TASK, "").orEmpty().trim()
+        val start = prefs.getLong(KEY_PENDING_START, 0L)
+        clearPendingFocus()
+        if (focusLogged) return
+        focusLogged = true
+
+        deadlineMillis = deadline
+        currentFocusStartMillis = start
+        val cur = _uiState.value ?: TimerUiState()
+        _uiState.value = cur.copy(
+            mode = TimerMode.FOCUS,
+            remainingMillis = 0L,
+            isRunning = false,
+            taskName = name
+        )
+
+        if (name.isBlank()) {
+            currentJournalEntryId = null
+            return
+        }
+        val entry = JournalEntry(taskName = name, startTime = start, timestamp = deadline)
+        currentJournalEntryId = entry.id
+        _journalEntries.value = listOf(entry) + (_journalEntries.value ?: emptyList())
     }
 
     fun reloadDurations(ctx: Context) {
@@ -272,6 +353,14 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
             deadlineMillis = System.currentTimeMillis() + cur.remainingMillis
             startTicker()
         }
+        if (cur.mode == TimerMode.FOCUS && !focusLogged) {
+            // Pausing stores a 0 deadline so a paused session is never recovered as finished.
+            persistPendingFocus(
+                cur.taskName,
+                currentFocusStartMillis,
+                if (cur.isRunning) 0L else deadlineMillis
+            )
+        }
         _uiState.postValue(cur.copy(isRunning = !cur.isRunning))
     }
 
@@ -286,6 +375,9 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
                 val remaining = (deadlineMillis - System.currentTimeMillis()).coerceAtLeast(0L)
                 val latest = _uiState.value ?: continue
                 if (remaining <= 0L) {
+                    // Record the focus session as soon as the timer ends, so it is
+                    // journaled even if the user never manually advances.
+                    if (latest.mode == TimerMode.FOCUS) logFocusToJournal()
                     _uiState.postValue(latest.copy(remainingMillis = 0L, isRunning = false))
                     tickJob?.cancel()
                     // Service handles its own completion notification
@@ -309,10 +401,27 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun syncFromDeadline() {
-        if (!TimerForegroundService.isServiceRunning) return
+        // A focus timer that finished while the app was away is journaled from disk —
+        // the service stops itself at zero, so it is no longer running by the time we
+        // get here and the in-memory tick job may never have seen the timer end.
+        flushPendingFocusSession()
+
+        if (!TimerForegroundService.isServiceRunning) {
+            // Nothing ticking: make sure a timer that ran out while we were away shows
+            // as finished rather than frozen mid-countdown.
+            val cur = _uiState.value ?: return
+            if (cur.isRunning && deadlineMillis > 0L && System.currentTimeMillis() >= deadlineMillis) {
+                cancelTickJob()
+                if (cur.mode == TimerMode.FOCUS) logFocusToJournal()
+                _uiState.postValue(cur.copy(remainingMillis = 0L, isRunning = false))
+            }
+            return
+        }
+
         val remaining = (TimerForegroundService.deadlineMillis - System.currentTimeMillis()).coerceAtLeast(0L)
         val cur = _uiState.value ?: return
         if (remaining <= 0L) {
+            if (cur.mode == TimerMode.FOCUS) logFocusToJournal()
             _uiState.postValue(cur.copy(remainingMillis = 0L, isRunning = false))
         } else {
             deadlineMillis = TimerForegroundService.deadlineMillis
@@ -333,6 +442,11 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateTaskName(name: String) {
         val cur = _uiState.value ?: return
+        // Keep the on-disk copy current: the name is usually typed after the focus
+        // timer has already started, and it is what ends up in the Journal.
+        if (cur.mode == TimerMode.FOCUS && !focusLogged) {
+            prefs.edit().putString(KEY_PENDING_TASK, name).apply()
+        }
         _uiState.postValue(cur.copy(taskName = name))
     }
 
@@ -437,15 +551,62 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
     private fun logFocusToJournal() {
         val cur = _uiState.value ?: return
         if (cur.mode != TimerMode.FOCUS) return
+        if (focusLogged) return
+        focusLogged = true
+        clearPendingFocus()
         val name = cur.taskName.trim()
         if (name.isBlank()) {
             currentJournalEntryId = null
             return
         }
-        val entry = JournalEntry(taskName = name)
+        val entry = JournalEntry(
+            taskName = name,
+            startTime = currentFocusStartMillis,
+            timestamp = System.currentTimeMillis()
+        )
         currentJournalEntryId = entry.id
         val existing = _journalEntries.value ?: emptyList()
         _journalEntries.postValue(listOf(entry) + existing)
+    }
+
+    /** Creates a brand-new journal entry from user input (custom note). */
+    fun addCustomJournalEntry(
+        taskName: String,
+        startTime: Long,
+        endTime: Long,
+        improvements: List<ReviewItem>,
+        note: String
+    ) {
+        val entry = JournalEntry(
+            taskName = taskName.trim(),
+            improvements = improvements,
+            note = note.trim(),
+            startTime = startTime,
+            timestamp = endTime
+        )
+        val existing = _journalEntries.value ?: emptyList()
+        _journalEntries.postValue(listOf(entry) + existing)
+    }
+
+    /** Applies user edits to an existing journal entry. */
+    fun updateJournalEntry(
+        id: Long,
+        taskName: String,
+        startTime: Long,
+        endTime: Long,
+        improvements: List<ReviewItem>,
+        note: String
+    ) {
+        val existing = _journalEntries.value ?: return
+        _journalEntries.postValue(existing.map {
+            if (it.id == id) it.copy(
+                taskName = taskName.trim(),
+                startTime = startTime,
+                timestamp = endTime,
+                improvements = improvements,
+                note = note.trim()
+            ) else it
+        })
     }
 
     private fun attachImprovementsToJournal(improvements: List<ReviewItem>) {
@@ -586,7 +747,10 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         val millis = minutesToMillis(focusMinutes)
         val checklist = buildChecklist(ctx)
         val hasChecklist = checklist.isNotEmpty()
+        currentFocusStartMillis = System.currentTimeMillis()
+        focusLogged = false
         deadlineMillis = System.currentTimeMillis() + millis
+        persistPendingFocus("", currentFocusStartMillis, if (hasChecklist) 0L else deadlineMillis)
         _uiState.postValue(TimerUiState(
             mode = TimerMode.FOCUS,
             remainingMillis = millis,
@@ -612,7 +776,10 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         val focusSubtasks = todoSubtasks.map { sub ->
             Subtask(id = sub.id, text = sub.text, isDone = sub.isDone)
         }
+        currentFocusStartMillis = System.currentTimeMillis()
+        focusLogged = false
         deadlineMillis = System.currentTimeMillis() + millis
+        persistPendingFocus(taskName, currentFocusStartMillis, if (hasChecklist) 0L else deadlineMillis)
         _uiState.postValue(TimerUiState(
             mode = TimerMode.FOCUS,
             remainingMillis = millis,
@@ -844,7 +1011,10 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         val checklist = buildChecklist(ctx)
         val hasChecklist = checklist.isNotEmpty()
         val subtasks = routine.subtasks.map { Subtask(text = it.text, description = it.description, minutes = it.minutes) }
+        currentFocusStartMillis = System.currentTimeMillis()
+        focusLogged = false
         deadlineMillis = System.currentTimeMillis() + millis
+        persistPendingFocus(routine.name, currentFocusStartMillis, if (hasChecklist) 0L else deadlineMillis)
         _uiState.postValue(TimerUiState(
             mode = TimerMode.FOCUS,
             remainingMillis = millis,
@@ -928,7 +1098,10 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
             val millis = minutesToMillis(focusMinutes)
             val checklist = buildChecklist(ctx)
             val hasChecklist = checklist.isNotEmpty()
+            currentFocusStartMillis = System.currentTimeMillis()
+            focusLogged = false
             deadlineMillis = System.currentTimeMillis() + millis
+            persistPendingFocus(routine.name, currentFocusStartMillis, if (hasChecklist) 0L else deadlineMillis)
             _uiState.postValue(TimerUiState(
                 mode = TimerMode.FOCUS,
                 remainingMillis = millis,
@@ -946,6 +1119,7 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             activeRoutine = null
             currentCycle = 0
+            clearPendingFocus()
             reloadDurations(ctx)
             _uiState.postValue(TimerUiState(
                 mode = TimerMode.FOCUS,
@@ -968,7 +1142,18 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun advanceFromNotification(ctx: Context) {
+    fun advanceFromNotification(ctx: Context, completedMode: TimerMode?) {
+        val cur = _uiState.value
+        // Only advance if the timer is still sitting at the completed state this
+        // notification was posted for. If the user has since started a new session
+        // (or the timer has already moved on), the notification is stale — just
+        // open the app without touching the running timer.
+        if (cur != null && completedMode != null &&
+            (cur.mode != completedMode || cur.remainingMillis > 0L)
+        ) {
+            _navigateHomeEvent.postValue(System.currentTimeMillis())
+            return
+        }
         advanceToNext(ctx)
         _navigateHomeEvent.postValue(System.currentTimeMillis())
     }

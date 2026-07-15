@@ -12,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.core.content.ContextCompat
 import com.pomodoro.ui.PomodoroApp
+import com.pomodoro.ui.TimerMode
 import com.pomodoro.ui.TimerViewModel
 
 class MainActivity : ComponentActivity() {
@@ -45,7 +46,9 @@ class MainActivity : ComponentActivity() {
 
     private fun handleAdvanceIntent(intent: Intent?) {
         if (intent?.action != NotificationHelper.ACTION_ADVANCE_FROM_NOTIFICATION) return
-        timerViewModel.advanceFromNotification(this)
+        val completedMode = intent.getStringExtra(NotificationHelper.EXTRA_COMPLETED_MODE)
+            ?.let { runCatching { TimerMode.valueOf(it) }.getOrNull() }
+        timerViewModel.advanceFromNotification(this, completedMode)
         intent.action = null
     }
 
